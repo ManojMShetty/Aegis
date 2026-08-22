@@ -1,0 +1,51 @@
+# Aegis-RAG model routing.
+#
+# Maps each Aegis principal (see aegis.llm.base.Role) to the provider and model
+# that plays it. Like config/trust_tiers.yaml, this is deliberately data, not
+# code: which model runs each role is an operational choice a reviewer should be
+# able to read off in one place, and changing it must not require touching Python.
+#
+# The router (aegis.llm.router) loads this file, shares one Budget across every
+# provider it builds, and fails closed on an unknown role or provider kind.
+#
+# Provider kinds:
+#   gemini - the live httpx client (needs GEMINI_API_KEY in the environment)
+#   fake   - the offline, scriptable provider, for tests and no-network dry runs
+#
+# Model IDs are pinned (not the *-latest aliases) so a paired defence-off/-on
+# comparison uses a fixed model - a moving alias would confound the result.
+# NOTE: gemini-2.5-* is 404 for new API keys ("no longer available to new
+# users"); the current free line is gemini-3.5-flash / -flash-lite. Verified
+# against a live call, not the model-list endpoint (which lists 2.5 anyway).
+
+roles:
+  # The isolated, tool-less extractor that reads UNTRUSTED text at the quarantine
+  # boundary. It only emits schema-constrained values, so the cheapest capable
+  # model is the right call.
+  quarantine:
+    provider: gemini
+    model: gemini-3.5-flash-lite
+
+  # Scores attack success / answer quality in the eval harness. High volume,
+  # narrow judgements - again the lite model.
+  judge:
+    provider: gemini
+    model: gemini-3.5-flash-lite
+
+  # The agent that may call tools and reasons over trusted intent. Gets the
+  # stronger model because its mistakes are the ones that matter.
+  privileged_agent:
+    provider: gemini
+    model: gemini-3.5-flash
+
+  # The red-team model that authors injection attempts in the eval. Stronger
+  # model so the attacks are a fair test of the defenses.
+  attacker:
+    provider: gemini
+    model: gemini-3.5-flash
+
+# Shared frugality caps (aegis.llm.budget.Budget). Set safely below the Gemini
+# free-tier daily limits so a runaway run fails closed instead of blowing quota.
+budget:
+  max_requests_per_day: 200
+  max_requests_per_run: 50

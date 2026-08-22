@@ -1,0 +1,126 @@
+# Aegis-RAG security policy.
+#
+# This file is the deployment-facing control surface for the trust lattice
+# (L1) and the capability gate (L5). It answers two questions:
+#
+#   1. What tier does content from a given source start at?
+#   2. What must be true before a given tool is allowed to fire?
+#
+# It is deliberately data, not code: a reviewer should be able to audit the
+# system's security posture by reading this file, and changing posture should
+# not require changing Python.
+#
+# FAIL CLOSED: an unmatched source is UNTRUSTED; an unlisted tool is denied.
+
+version: 1
+
+# ---------------------------------------------------------------------------
+# Source -> starting trust tier.
+# First match wins, so order matters: put specific patterns above general ones.
+# Patterns are globs matched against the full source URI.
+# ---------------------------------------------------------------------------
+sources:
+  # Root of trust — our own configuration and prompts.
+  - match: "config://*"
+    tier: T4_SYSTEM
+    note: "system prompt, tool schemas, this policy file"
+
+  # The live human in this session. The only source of intent.
+  - match: "session://user-turn"
+    tier: T3_USER
+    note: "what the user actually typed this turn"
+
+  # Owner-ingested, vetted corpus. Trusted content, still not a command.
+  - match: "kb://*"
+    tier: T2_CURATED
+  - match: "file://corpus/*"
+    tier: T2_CURATED
+
+  # Everything below is adversary-controlled by assumption.
+  - match: "https://*"
+    tier: T0_UNTRUSTED
+    note: "any web page, including ones the user named"
+  - match: "http://*"
+    tier: T0_UNTRUSTED
+  - match: "email://inbound/*"
+    tier: T0_UNTRUSTED
+    note: "anyone can send you an email; the body is attacker-controlled"
+  - match: "tool://*"
+    tier: T0_UNTRUSTED
+    note: "tool output can embed attacker text fetched from elsewhere"
+
+# Fallback when nothing matches. Must stay UNTRUSTED: a source we failed to
+# classify is a source we do not understand.
+default_tier: T0_UNTRUSTED
+
+# ---------------------------------------------------------------------------
+# Detector signals severe enough to veto a side-effecting call.
+# Kept small on purpose: the detector is advisory (a legitimate document may
+# quote an attack string), so only high-confidence signals get veto power.
+# ---------------------------------------------------------------------------
+blocking_flags:
+  - injection_high_confidence
+  - exfiltration_pattern
+  - tool_invocation_attempt
+  - credential_pattern
+
+# ---------------------------------------------------------------------------
+# Tool policies.
+#
+#   side_effecting        does calling this change the world?
+#   min_arg_tier          floor on the GLB of argument tiers
+#   high_risk_args        args that decide WHO or WHAT is affected
+#   allowlists            exact values a high-risk arg may take when tainted
+#   requires_confirmation always ask a human, even when the rules pass
+#
+# Read-only tools are permissive by design: the worst case for a poisoned
+# search is a bad answer. Side-effecting tools are where the budget goes.
+# ---------------------------------------------------------------------------
+tools:
+  # -- read-only -----------------------------------------------------------
+  search:
+    side_effecting: false
+    min_arg_tier: T0_UNTRUSTED
+
+  read_file:
+    side_effecting: false
+    min_arg_tier: T0_UNTRUSTED
+
+  get_web_page:
+    side_effecting: false
+    min_arg_tier: T0_UNTRUSTED
+
+  # -- side-effecting ------------------------------------------------------
+  send_email:
+    side_effecting: true
+    # Raw untrusted text must pass through quarantine before it can be
+    # anywhere near an outbound message.
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [to, cc, bcc]
+    allowlists:
+      # Empty by default: no attacker-influenced recipient is acceptable.
+      # A deployment adds its own known-good addresses here.
+      to: []
+
+  create_calendar_event:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [participants]
+
+  send_money:
+    side_effecting: true
+    # Money moves only on data the human supplied. Quarantine is not enough.
+    min_arg_tier: T3_USER
+    high_risk_args: [recipient, amount]
+    requires_confirmation: true
+
+  delete_file:
+    side_effecting: true
+    min_arg_tier: T3_USER
+    high_risk_args: [path]
+    requires_confirmation: true
+
+  post_message:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [channel, recipient]

@@ -1,0 +1,36 @@
+# Environments / secrets — NEVER commit real credentials
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Models / data caches
+.cache/
+models/
+data/raw/
+*.bin
+*.safetensors
+
+# Eval artifacts: keep curated results (they are the portfolio proof),
+# ignore raw per-run dumps which are large and noisy.
+results/raw/
+results/**/*.jsonl
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
