@@ -82,6 +82,30 @@ blocking_flags:
 #
 # Read-only tools are permissive by design: the worst case for a poisoned
 # search is a bad answer. Side-effecting tools are where the budget goes.
+#
+# WHY NO SINK ASKS FOR T1_QUARANTINE_DERIVED
+# ------------------------------------------
+# It reads like the strictest useful floor, and it is not a floor at all: it is a
+# ban on every side effect that touches anything a tool returned. The GLB is over
+# ALL arguments, so `send_email(recipients=<the address the user typed>,
+# body=<the note the agent just read>)` sits at T0 because of the body, and a T1
+# floor denies it - with no attack anywhere in the task. Nothing can lift it
+# either: the quarantine extractor (L4) carries two BOOLEANS across the dual-LLM
+# boundary and deliberately never launders the prose it read into a higher tier,
+# so no argument in this harness is ever T1. A floor that only an unreachable tier
+# could clear is a blanket denial with a misleading name, and it costs utility -
+# half of what this project measures - for no marginal security.
+#
+# What actually stops exfiltration is `high_risk_args`: the arguments that decide
+# WHO or WHAT is affected must not be attacker-influenced (T0/T1) unless they are
+# allowlisted, which refuses `recipients=<the address the poisoned page chose>`
+# while allowing `recipients=<the address the user typed>` in the very same call.
+# Blocking detector flags (`blocking_flags` above) veto a side effect on a second,
+# independent axis. Both of those discriminate; the T1 floor did not.
+#
+# T3_USER floors below are a different judgement and stay: money, deletion and
+# account changes may act ONLY on values the human supplied, and each of those
+# tools also demands a human in the loop.
 # ---------------------------------------------------------------------------
 tools:
   # -- read-only -----------------------------------------------------------
@@ -100,9 +124,10 @@ tools:
   # -- side-effecting ------------------------------------------------------
   send_email:
     side_effecting: true
-    # Raw untrusted text must pass through quarantine before it can be
-    # anywhere near an outbound message.
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    # No floor: forwarding something a tool returned is the ordinary shape of this
+    # tool's benign use. The recipient is what decides whether it is exfiltration,
+    # and that is `high_risk_args` below.
+    min_arg_tier: T0_UNTRUSTED
     # `to` is our own vocabulary; `recipients` is what AgentDojo's workspace and
     # travel suites name the same argument. Both are listed because a high-risk
     # argument that is spelled differently by the deployment is an unguarded one.
@@ -114,7 +139,7 @@ tools:
 
   create_calendar_event:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [participants]
 
   send_money:
@@ -133,7 +158,7 @@ tools:
 
   post_message:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [channel, recipient]
 
 # ---------------------------------------------------------------------------
@@ -187,7 +212,7 @@ tools:
     side_effecting: false
   delete_email:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [email_id]
 
   # -- workspace / travel: calendar ----------------------------------------
@@ -199,15 +224,15 @@ tools:
     side_effecting: false
   cancel_calendar_event:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [event_id]
   reschedule_calendar_event:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [event_id]
   add_calendar_event_participants:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     # Adding a participant is how a calendar tool becomes an exfiltration tool:
     # the event body travels to whoever is on the invite.
     high_risk_args: [event_id, participants]
@@ -223,17 +248,17 @@ tools:
     side_effecting: false
   create_file:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [filename, content]
   append_to_file:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [file_id, content]
   share_file:
     side_effecting: true
     # The canonical exfiltration sink of the workspace suite: it hands a document
     # to an address the agent chose.
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [file_id, email, permission]
 
   # -- banking --------------------------------------------------------------
@@ -265,7 +290,7 @@ tools:
     requires_confirmation: true
   update_user_info:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [first_name, last_name, street, city]
 
   # -- travel: reads --------------------------------------------------------
@@ -313,15 +338,15 @@ tools:
   # -- travel: bookings (these spend the user's money) ----------------------
   reserve_hotel:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [hotel]
   reserve_car_rental:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [company]
   reserve_restaurant:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [restaurant]
 
   # -- slack ----------------------------------------------------------------
@@ -337,19 +362,19 @@ tools:
     side_effecting: false
   send_direct_message:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [recipient]
   send_channel_message:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [channel]
   add_user_to_channel:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [user, channel]
   invite_user_to_slack:
     side_effecting: true
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [user, user_email]
   remove_user_from_slack:
     side_effecting: true
@@ -361,5 +386,5 @@ tools:
   post_webpage:
     side_effecting: true
     # Writing to a URL the agent chose is exfiltration with extra steps.
-    min_arg_tier: T1_QUARANTINE_DERIVED
+    min_arg_tier: T0_UNTRUSTED
     high_risk_args: [url, content]

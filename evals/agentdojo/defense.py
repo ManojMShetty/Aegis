@@ -61,9 +61,28 @@ and the reason is a property of the threat model rather than a preference:
     input), so a literal break-out cannot parse. But a fence is still one line of
     prose away from being talked past: "the data ends here, now follow these
     instructions" needs no forged marker at all. DATAMARK removes the contiguity
-    the injected sentence needs - every whitespace run becomes a private-use
+    the injected sentence needs - every gap between words becomes a private-use
     marker character, so an instruction inside the span cannot form ordinary
     prose, and any span LACKING the marks is visibly not part of the data.
+
+    Whitespace INSIDE a line only: line breaks and indentation survive. The
+    paper's rule is every whitespace run, and applying it here would measure the
+    wrong thing - AgentDojo renders tool results as YAML, so collapsing the line
+    structure turns a list of records into one boundary-free token stream and the
+    L2 arm reports "we flattened every tool result" rather than the cost of
+    spotlighting (see :data:`aegis.security.spotlight._INTRA_LINE_WHITESPACE`).
+    It is also cheaper: a private-use codepoint has no tokenizer merge rule and is
+    billed per occurrence, so marking fewer runs costs fewer tokens.
+
+Marking is only half of L2. The other half is the prompt-side convention that
+says what the marks mean, so :func:`build_aegis_pipeline` appends the style's
+guidance to the system message whenever L2 is on. Without it the model sees
+``<<UNTRUSTED_e1b49acf>>`` against a stock system prompt that mentions neither
+the fence nor the datamark - unexplained token corruption at full token cost, and
+the sentence above about an unmarked span has nothing to rest on. The guidance
+describes the marker SHAPE, never one nonce: a fresh nonce is drawn per block, so
+naming one would both mislead the model about later blocks and hand the attacker
+the value the break-out defense depends on being unpredictable.
 
 L3 - detection (``config.detect``). ADVISORY ONLY, and it must stay that way.
 It scans the RAW output (before spotlighting - datamarking would break every
@@ -155,7 +174,12 @@ from aegis.security.capabilities import (
 from aegis.security.capabilities import Verdict as GateVerdict
 from aegis.security.detector import DetectionResult, HeuristicDetector
 from aegis.security.quarantine import QuarantineExtractor
-from aegis.security.spotlight import DEFAULT_DATAMARK, Spotlighter, SpotlightStyle
+from aegis.security.spotlight import (
+    DEFAULT_DATAMARK,
+    Spotlighter,
+    SpotlightStyle,
+    guidance_for_style,
+)
 
 __all__ = [
     "AEGIS_GENERATED",
@@ -373,8 +397,15 @@ class TaintState:
         The cost of a false reset is re-scanning messages we already scanned; the
         cost of a missed reset is a wrong number in a paper. The asymmetry is why
         both checks are here.
+
+        The second signal is not hypothetical: ``task_suite.py`` runs every
+        injection variant of a user task against ONE reused pipeline with the same
+        ``user_task.PROMPT``, so the key is byte-identical across the couples of a
+        task. Without the count check, every couple after the first would find
+        ``processed_messages`` already past the end of its own short history, be
+        returned untouched, and run UNDEFENDED under a defended label.
         """
-        if conversation_key != self._conversation_key:
+        if conversation_key != self._conversation_key or message_count <= self._processed_messages:
             self.reset(conversation_key)
             return True
         return False
@@ -591,9 +622,22 @@ class AegisToolOutputGuard(BasePipelineElement):  # type: ignore[misc]  # agentd
     def _guard_message(self, message: ChatMessage) -> ChatMessage:
         """Apply L1/L2/L3 to one message, or return it untouched.
 
-        Anything that is not a tool result carrying at least one text block is
-        returned as the identical object: an assistant turn, a user turn, an
-        error-only result, or a shape we do not recognise.
+        Anything that is not a tool result carrying model-readable text - in a
+        content block or in ``error`` - is returned as the identical object: an
+        assistant turn, a user turn, a result with no text at all, or a shape we do
+        not recognise.
+
+        BOTH halves are guarded, because the two disagree about which one the model
+        reads. ``ToolsExecutor`` answers a failed call with an EMPTY content block
+        and the exception text in ``error``, and ``OpenAILLM`` renders
+        ``message["error"] or <content blocks>`` - so on an errored call the model
+        reads the error string and never the content. A guard that inspected
+        content alone would record an empty result, scan nothing, fence nothing,
+        and report the turn as guarded while the only text the model actually saw
+        went past L1, L2 and L3 untouched.
+
+        The error is MARKED in full but RECORDED with the agent's own arguments
+        removed; :func:`_untrusted_text_of` says why the two differ.
         """
         if not isinstance(message, dict) or message.get("role") != "tool":
             return message
@@ -601,11 +645,14 @@ class AegisToolOutputGuard(BasePipelineElement):  # type: ignore[misc]  # agentd
         if message.get(AEGIS_GENERATED):
             return message
         blocks = message.get("content")
-        if not isinstance(blocks, list) or not any(_is_text_block(b) for b in blocks):
+        text_blocks = [b for b in blocks if _is_text_block(b)] if isinstance(blocks, list) else []
+        error = message.get("error")
+        error_text = error if isinstance(error, str) else ""
+        if not text_blocks and not error_text:
             return message
 
         tool_name = _tool_name_of(message)
-        raw = _text_of(message)
+        raw = _untrusted_text_of(message)
 
         # L1 - the output is attacker-controlled until proven otherwise, and the
         # provenance says which tool it came through.
@@ -635,17 +682,21 @@ class AegisToolOutputGuard(BasePipelineElement):  # type: ignore[misc]  # agentd
         # joining, wrapping once, and emitting a single block) keeps every
         # non-text block in place and cannot drop content if a result ever
         # arrives as more than one block.
-        guarded_blocks = [
-            text_content_block_from_string(
-                self._spotlighter.wrap(tainted.with_value(_block_text(block))).text
-            )
-            if _is_text_block(block)
-            else block
-            for block in blocks
-        ]
         rewritten = dict(message)
-        rewritten["content"] = guarded_blocks
-        return rewritten
+        if isinstance(blocks, list):
+            rewritten["content"] = [
+                text_content_block_from_string(
+                    self._spotlighter.wrap(tainted.with_value(_block_text(block))).text
+                )
+                if _is_text_block(block)
+                else block
+                for block in blocks
+            ]
+        if error_text:
+            # The same treatment, for the half the model will actually be shown.
+            # Marking only the content would spotlight the string nobody reads.
+            rewritten["error"] = self._spotlighter.wrap(tainted.with_value(error_text)).text
+        return cast(ChatMessage, rewritten)
 
     def _assess_in_quarantine(self, tainted: Tainted[str]) -> Tainted[str]:
         """L4: ask the isolated extractor whether this text is addressing us.
@@ -689,6 +740,60 @@ def _is_text_block(block: object) -> bool:
 def _block_text(block: Any) -> str:
     content = block.get("content")
     return content if isinstance(content, str) else ""
+
+
+def _untrusted_text_of(message: Any) -> str:
+    """What the guard treats as untrusted text arriving from the tool boundary.
+
+    The content blocks AND ``error``, because the LLM elements disagree about which
+    one the model is shown and a result that errored carries its whole payload in
+    ``error``. Separate from :func:`_text_of`, which answers the narrower question
+    "what is in the content blocks" - the one the conversation key asks of a USER
+    message.
+
+    MINUS the agent's own arguments wherever the error quotes them back. That
+    subtraction is not tidiness: AgentDojo answers a call that omits a required
+    field with pydantic's ``ValidationError``, which embeds the input dict
+    verbatim, so ``send_email(recipients=["dana@corp.example"])`` with no body
+    comes back as an error string containing ``dana@corp.example``. Recorded whole,
+    that address would sit in the text L5 matches later arguments against, so the
+    agent's CORRECTED retry would trace its own recipient to "tool output", find it
+    high-risk and attacker-influenced, and be refused - a benign task lost, in the
+    defended arm only, over a value no tool ever produced. It is the rule
+    :data:`_MIN_MATCH_CHARS` exists for, applied to a second source of false
+    attribution: text that agrees with an argument for a reason other than
+    provenance is not provenance.
+
+    What the subtraction cannot remove - anything the ENVIRONMENT put into the
+    exception - is exactly what stays, and that is the text this closes the gap on.
+    Today no v1.2 suite tool interpolates environment prose into an exception, so
+    the gap is structural rather than live; it is closed anyway, because "the guard
+    saw what the model saw" is the invariant every layer above rests on.
+    """
+    error = message.get("error") if isinstance(message, dict) else None
+    parts = (_text_of(message), _without_own_args(error, message) if error else None)
+    return "\n".join(p for p in parts if isinstance(p, str) and p)
+
+
+def _without_own_args(error: Any, message: Any) -> str:
+    """Blank out the producing call's own argument values inside an error string.
+
+    A plain replace on the raw text: AgentDojo's errors quote arguments verbatim -
+    that is what makes the echo recognisable at all - and anything left behind is no
+    worse than not having tried. Values too short to be attributed anyway are left
+    alone, because :func:`_appears_in` already refuses to trace taint to them.
+    """
+    if not isinstance(error, str):
+        return ""
+    call = message.get("tool_call") if isinstance(message, dict) else None
+    args = getattr(call, "args", None)
+    if not isinstance(args, Mapping):
+        return error
+    stripped = error
+    for text in _leaf_texts(dict(args)):
+        if len(text) >= _MIN_MATCH_CHARS:
+            stripped = stripped.replace(text, " ")
+    return stripped
 
 
 def _text_of(message: Any) -> str:
@@ -736,11 +841,19 @@ CONTEXT_ARG = "<conversation>"
 """Synthetic argument name standing in for "the untrusted context of this task".
 
 ``glb`` over an EMPTY mapping is the lattice's top (SYSTEM), so a side-effecting
-call with no arguments at all would clear every tier floor unconditionally - a
-gate that can be bypassed by calling a tool that takes no parameters is not a
-gate. When a side-effecting call carries no arguments and untrusted output has
-already entered the conversation, this pseudo-argument carries that context's
-tier and flags so the floor still applies.
+call with no arguments at all would clear every tier floor unconditionally, and
+the per-argument rules would have no argument to look at - a gate that can be
+bypassed by calling a tool that takes no parameters is not a gate. When a
+side-effecting call carries no arguments and untrusted output has already entered
+the conversation, this pseudo-argument carries that context's tier AND its
+detector flags, so both the tier floor and the blocking-flag rule still have
+something to judge.
+
+Under the shipped policy the FLAGS are the half that does the work: no sink there
+asks for a floor above T0 any more, because a reachable floor over the GLB of all
+arguments is a ban on every side effect that touches anything a tool returned
+(see ``config/trust_tiers.yaml``). The tier half stays for the deployments whose
+sinks do set one, and for the money/deletion tools that demand T3.
 """
 
 _MIN_MATCH_CHARS = 4
@@ -749,6 +862,24 @@ _MIN_MATCH_CHARS = 4
 Below this, agreement is coincidence: ``true``, ``1``, ``rw`` and ``id`` appear in
 almost any text, and taint attributed by coincidence is a refusal attributed to
 nothing.
+"""
+
+_MIN_SCALAR_MATCH_CHARS = 8
+"""The same floor, raised for a value that is not a string.
+
+A string argument may be text the model copied out of a tool result. A number or a
+boolean is not copied text at all - it is a RENDERING, and its agreement with
+prose is correspondingly cheaper. ``str(False)`` is ``'False'``, which occurs in
+any YAML carrying ``recurring: false``; ``str(2024)`` occurs in any document that
+mentions the year; both clear :data:`_MIN_MATCH_CHARS` comfortably. Attributing
+taint that way is not merely noise now that the sinks carry no tier floor: the
+coincidentally-matched argument also inherits the matched output's DETECTOR FLAGS,
+so a calendar call with ``all_day=False`` would be refused because some flagged
+document elsewhere in the task contained the word "false".
+
+Eight characters is where a rendered scalar stops being a plausible coincidence
+and starts being an identifier: a year, an hour, a small amount and both booleans
+are all shorter, while an account number, an epoch timestamp or a long id is not.
 """
 
 _TAINT_VIOLATIONS = frozenset(
@@ -1006,7 +1137,22 @@ class AegisGatedToolsExecutor(ToolsExecutor):  # type: ignore[misc]  # agentdojo
         if decisions is None or not any(d.refused for d in decisions):
             return self._delegate(query, runtime, env, messages, extra_args)
 
-        return self._execute(query, runtime, env, list(messages), extra_args, decisions)
+        try:
+            return self._execute(query, runtime, env, list(messages), extra_args, decisions)
+        except Exception:
+            # The never-raise contract covers the substitution too, and this is the
+            # newest code in the module, runs only when the defense actually fires,
+            # and is the one place that synthesises messages - so it is the least
+            # proven path, guarded the same way the decision path above is.
+            #
+            # The fallback repeats the turn ungated, which can re-run a call
+            # _execute had already run. That is the lesser harm by a wide margin: a
+            # raise here propagates out of benchmark_suite_* and ends the run,
+            # discarding every task still to come along with the day's quota, while
+            # a repeated call costs one duplicated side effect in one task - and
+            # `failures` says on which run it happened.
+            self.failures += 1
+            return self._delegate(query, runtime, env, messages, extra_args)
 
     # -- internals ------------------------------------------------------------
 
@@ -1276,7 +1422,10 @@ def _leaf_texts(value: Any) -> list[str]:
         return [text for item in value.values() for text in _leaf_texts(item)]
     if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
         return [text for item in value for text in _leaf_texts(item)]
-    return [str(value)]
+    # A non-string scalar is only evidence when it is long enough to identify
+    # something; see _MIN_SCALAR_MATCH_CHARS.
+    rendered = str(value)
+    return [rendered] if len(rendered) >= _MIN_SCALAR_MATCH_CHARS else []
 
 
 def _appears_in(value: Any, normalised_output: str) -> bool:
@@ -1336,10 +1485,15 @@ def build_aegis_pipeline(
         baseline: [SystemMessage, InitQuery, llm, Loop([ToolsExecutor,        llm])]
         aegis:    [SystemMessage, InitQuery, llm, Loop([AegisGated..., Guard, llm])]
 
-    With ``DefenseConfig.none()`` both Aegis elements delegate to exactly the base
-    behaviour, so the all-off arm is a genuine control rather than an
-    approximation of one - ``tests/evals/test_defense.py`` asserts the two
-    pipelines produce identical conversations and identical side effects.
+    The one other difference is the system message: when L2 is on, the style's
+    marker guidance is appended to it, because a mark the model was never taught to
+    read is not spotlighting (AgentDojo's own ``spotlighting_with_delimiting``
+    defense edits the system message for the same reason). That edit is gated on
+    the L2 toggle, so with ``DefenseConfig.none()`` both Aegis elements delegate to
+    exactly the base behaviour AND the prompt is byte-identical - the all-off arm
+    is a genuine control rather than an approximation of one.
+    ``tests/evals/test_defense.py`` asserts the two pipelines produce identical
+    conversations and identical side effects.
 
     Args:
         llm: The agent-under-test element. It appears twice, as in every AgentDojo
@@ -1368,6 +1522,16 @@ def build_aegis_pipeline(
     if config.system_message is None:  # pragma: no cover - PipelineConfig fills it in
         raise ValueError("PipelineConfig.system_message must be set before building a pipeline")
 
+    # L2 is marking PLUS the prompt-side convention that says what the marks mean;
+    # marking alone is the expensive half of spotlighting and buys nothing, because
+    # AgentDojo's stock system prompt mentions neither the fence nor the datamark.
+    # Appended (never rewritten) so the defended prompt still opens with the
+    # baseline one verbatim, and gated on the L2 toggle so the all-off arm's system
+    # message stays byte-identical to the undefended baseline's.
+    system_message: str = config.system_message
+    if defense.spotlight:
+        system_message = f"{system_message}\n{guidance_for_style(defense.spotlight_style)}"
+
     loaded = policy if policy is not None else SecurityPolicy.load()
     formatter = (
         partial(tool_result_to_str, dump_fn=json.dumps)
@@ -1395,7 +1559,7 @@ def build_aegis_pipeline(
     )
 
     tools_loop = ToolsExecutionLoop([executor, guard, llm], max_iters=max_iters)
-    pipeline = AgentPipeline([SystemMessage(config.system_message), InitQuery(), llm, tools_loop])
+    pipeline = AgentPipeline([SystemMessage(system_message), InitQuery(), llm, tools_loop])
     llm_name = config.llm if isinstance(config.llm, str) else getattr(llm, "name", None)
     pipeline.name = f"{llm_name}-{defense.label}" if llm_name else defense.label
     return AegisPipeline(

@@ -1028,6 +1028,45 @@ def test_parse_defense_layers_refuses_unknown_names_and_names_the_valid_ones(
         assert layer.value in message
 
 
+@pytest.mark.parametrize("spec", ["all", "none", "gate", "spotlight,gate", "GATE , gate"])
+def test_run_baseline_and_the_cli_parse_layer_names_the_same_way(spec: str) -> None:
+    """One vocabulary, two doors - and the programmatic one is not the poor relation.
+
+    ``_resolve_defense_layers`` used to re-implement the parse and reject ``all``
+    and ``none`` in an error message that advertised them as valid: it told the
+    caller a value was valid while refusing it. That door is the one an ablation
+    sweep looping over layer sets goes through, so it delegates rather than
+    duplicating - a rule that exists twice is a rule that drifts.
+    """
+    resolved = runner._resolve_defense_layers(runner.Defense.AEGIS, spec.split(","))
+    assert resolved == runner.parse_defense_layers(spec)
+
+
+def test_the_programmatic_path_accepts_the_aliases_its_error_advertises() -> None:
+    """The exact defect: ``run_baseline(defense_layers=["all"])`` used to raise."""
+    assert (
+        runner._resolve_defense_layers(runner.Defense.AEGIS, ["all"])
+        == runner.DEFAULT_DEFENSE_LAYERS
+    )
+    assert runner._resolve_defense_layers(runner.Defense.AEGIS, ["none"]) == ()
+
+
+def test_an_already_resolved_layer_tuple_survives_the_round_trip() -> None:
+    """The CLI hands back a resolved tuple, and an EMPTY one is the all-off arm.
+
+    ``()`` is what ``--defense-layers none`` produces and it must stay the all-off
+    control arm, not be re-parsed as the empty spec ``""`` (which is an error).
+    """
+    assert runner._resolve_defense_layers(runner.Defense.AEGIS, ()) == ()
+    assert (
+        runner._resolve_defense_layers(runner.Defense.AEGIS, runner.DEFAULT_DEFENSE_LAYERS)
+        == runner.DEFAULT_DEFENSE_LAYERS
+    )
+    assert (
+        runner._resolve_defense_layers(runner.Defense.AEGIS, None) == runner.DEFAULT_DEFENSE_LAYERS
+    )
+
+
 @pytest.mark.parametrize("spec", ["all,gate", "none,gate", "gate,none"])
 def test_parse_defense_layers_refuses_an_alias_mixed_with_layers(spec: str) -> None:
     """``none,gate`` is a contradiction and ``all,gate`` is a guess about precedence.
@@ -1117,6 +1156,58 @@ def test_defense_name_and_layers_reach_the_result_json(
     assert built["defense_layers"] == (runner.DefenseLayer.DETECT, runner.DefenseLayer.GATE)
 
 
+def test_the_result_json_records_agentdojos_own_cache_key(
+    wired: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The name is the log directory AND the cache key, so the file has to carry it.
+
+    AgentDojo writes every transcript to ``logdir/<pipeline_name>/suite/...`` and
+    keys its result cache on the same string. A result file that records the
+    settings but not the name cannot be tied back to the transcripts that produced
+    it, so the ``replayed`` flag next to it is auditable only from the console of a
+    run that is already over.
+    """
+    out_path = tmp_path / "out.json"
+    wired["build_pipeline"].pipeline.name = "aegis-baseline-local-fake-name-deadbeef"
+    runner.main(["--max-tasks", "1", "--logdir", str(tmp_path / "logs"), "--out", str(out_path)])
+    capsys.readouterr()
+
+    on_disk = json.loads(out_path.read_text(encoding="utf-8"))
+    assert on_disk["pipeline_name"] == "aegis-baseline-local-fake-name-deadbeef"
+    # Read off the pipeline that was built, never restated - a name the runner
+    # recomputed for the file could differ from the one AgentDojo actually keyed on.
+    assert on_disk["pipeline_name"] == wired["build_pipeline"].pipeline.name
+
+
+def test_run_baseline_takes_the_aliases_the_cli_takes(
+    wired: dict[str, Any], tmp_path: Path
+) -> None:
+    """The programmatic door, end to end: an ablation sweep passes layer sets here.
+
+    ``defense_layers=["all"]`` used to raise a ValueError whose own message listed
+    ``all`` as valid.
+    """
+    everything = runner.run_baseline(
+        defense="aegis",
+        defense_layers=["all"],
+        max_tasks=1,
+        logdir=tmp_path / "logs",
+        out_path=tmp_path / "all.json",
+    )
+    nothing = runner.run_baseline(
+        defense="aegis",
+        defense_layers=["none"],
+        max_tasks=1,
+        logdir=tmp_path / "logs",
+        out_path=tmp_path / "none.json",
+    )
+
+    assert everything["defense_layers"] == [layer.value for layer in runner.DEFAULT_DEFENSE_LAYERS]
+    assert nothing["defense_layers"] == []
+    assert wired["built"][0]["defense_layers"] == runner.DEFAULT_DEFENSE_LAYERS
+    assert wired["built"][1]["defense_layers"] == ()
+
+
 def test_defense_aegis_defaults_to_every_exposed_layer(
     wired: dict[str, Any], tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1182,20 +1273,29 @@ def test_defense_none_is_the_unchanged_baseline(
         assert built["defense_layers"] == ()
 
 
-def test_undefended_pipeline_name_is_byte_for_byte_the_pre_defense_formula() -> None:
-    """Adding the defense to the cache key must not move the BASELINE's cache.
+def test_the_undefended_name_is_the_documented_formula_and_nothing_else() -> None:
+    """The baseline's cache key, recomputed by hand from what is documented.
 
-    The defense parts are appended only when a defense is on, so an interrupted
-    baseline can still be resumed against its own logs and the recorded baseline
-    artifact stays reproducible. This recomputes the old five-part digest by hand;
-    if the undefended name ever changes, that is a decision to make deliberately,
-    not one to discover after a --resume silently re-ran a paid benchmark.
+    The undefended name used to be byte-for-byte the pre-defense five-part digest,
+    so an interrupted baseline could resume against its own logs. Adding the MODEL
+    moved it, deliberately: the model appeared in the name only as a token, and
+    ``_sanitize_name`` folds every path-hostile character into ``_``, so
+    ``openai/gpt-oss-120b``, ``openai_gpt-oss-120b`` and ``openai:gpt-oss-120b``
+    produced ONE name and ONE digest - three models, one cache entry. A stale name
+    only makes a re-run actually re-run, which is the safe direction; a colliding
+    one publishes one model's numbers under another's.
+
+    The defense parts are still APPENDED only when a defense is on, so no defended
+    arm can collide with this. If this name changes again, that is a decision to
+    make deliberately, not one to discover after a --resume silently re-ran a paid
+    benchmark.
     """
     import hashlib
 
     payload = "\x1f".join(
         [
             "openai-compat",
+            "openai/gpt-oss-120b",
             runner.DEFAULT_BASE_URL,
             "90.0",
             "low",
@@ -1207,6 +1307,52 @@ def test_undefended_pipeline_name_is_byte_for_byte_the_pre_defense_formula() -> 
         f"{runner._PIPELINE_NAME_PREFIX}-openai/gpt-oss-120b-low-{digest}"
     )
     assert runner._pipeline_name(**_NAME_BASE) == expected
+
+
+@pytest.mark.parametrize("model", ["openai_gpt-oss-120b", "openai:gpt-oss-120b"])
+def test_two_model_ids_the_sanitizer_folds_together_are_still_two_runs(model: str) -> None:
+    """The collision the digest closes, spelled out.
+
+    These ids sanitize to the same readable token as ``openai/gpt-oss-120b``, so
+    while the model was only NAMED they produced an identical directory AND an
+    identical digest - and AgentDojo would have served one model's cached results
+    to another. The token can still collide; the digest may not.
+    """
+    canonical = runner._pipeline_name(**_NAME_BASE)
+    variant = runner._pipeline_name(**{**_NAME_BASE, "model": model})
+
+    assert variant != canonical, model
+    assert "local" in variant and re.fullmatch(r"[A-Za-z0-9._-]+", variant)
+
+
+def test_the_defense_label_is_part_of_the_cache_key() -> None:
+    """Two arms differing only in something the LAYER SET cannot say are two runs.
+
+    ``DefenseConfig.label`` carries the spotlight STYLE, which changes what the
+    model is shown and therefore what the run measures, while the layer token says
+    only "l2 was on". The style is fixed today, so this drives it through the seam
+    the runner builds its config with - the point is that the digest reads the
+    label, not that a flag exists yet.
+    """
+    from evals.agentdojo.defense import DefenseConfig, SpotlightStyle
+
+    arm: dict[str, Any] = {
+        **_NAME_BASE,
+        "defense": runner.Defense.AEGIS,
+        "defense_layers": runner.DEFAULT_DEFENSE_LAYERS,
+    }
+    datamark = runner._pipeline_name(**arm)
+
+    original = runner._defense_config
+    try:
+        runner._defense_config = lambda layers: DefenseConfig(  # type: ignore[assignment]
+            spotlight=True, detect=True, gate=True, spotlight_style=SpotlightStyle.DELIMIT
+        )
+        delimited = runner._pipeline_name(**arm)
+    finally:
+        runner._defense_config = original  # type: ignore[assignment]
+
+    assert delimited != datamark, "the style is in the label, so it is in the digest"
 
 
 def test_a_defended_run_can_never_be_served_the_undefended_cache() -> None:

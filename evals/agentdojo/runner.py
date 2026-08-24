@@ -302,7 +302,7 @@ def parse_defense_layers(spec: str) -> tuple[DefenseLayer, ...]:
     tokens = [token.strip().casefold() for token in spec.split(",")]
     if any(not token for token in tokens):
         raise ValueError(
-            f"--defense-layers has an empty entry in {spec!r}; "
+            f"defense layers {spec!r} has an empty entry; "
             f"pass a comma-separated list of: {_valid_layer_names()}"
         )
     aliases = {DEFENSE_LAYERS_ALL: DEFAULT_DEFENSE_LAYERS, DEFENSE_LAYERS_NONE: ()}
@@ -310,8 +310,8 @@ def parse_defense_layers(spec: str) -> tuple[DefenseLayer, ...]:
         if alias in tokens:
             if len(tokens) > 1:
                 raise ValueError(
-                    f"--defense-layers '{alias}' names the whole set and cannot be combined "
-                    f"with other entries (got {spec!r}); pass either '{alias}' alone or an "
+                    f"defense layer {alias!r} names the whole set and cannot be combined "
+                    f"with other entries (got {spec!r}); pass either {alias!r} alone or an "
                     f"explicit list of: {_valid_layer_names()}"
                 )
             return layers
@@ -319,7 +319,7 @@ def parse_defense_layers(spec: str) -> tuple[DefenseLayer, ...]:
     unknown = [token for token in tokens if token not in known]
     if unknown:
         raise ValueError(
-            f"--defense-layers got unknown layer(s) {', '.join(repr(u) for u in unknown)}; "
+            f"unknown defense layer(s) {', '.join(repr(u) for u in unknown)}; "
             f"valid layers are: {_valid_layer_names()}"
         )
     selected = {known[token] for token in tokens}
@@ -336,6 +336,13 @@ def _resolve_defense_layers(
     this reason. Naming layers for the undefended pipeline is refused rather than
     ignored, because a result JSON that recorded them would describe a defense that
     was never built.
+
+    The names themselves are handed to :func:`parse_defense_layers` rather than
+    re-parsed here, so there is ONE vocabulary and it cannot drift. It drifted once
+    already: this function used to reject ``all`` and ``none`` in an error message
+    that advertised them as valid, which is the worst shape an error can take - and
+    it is the programmatic path, the one an ablation sweep looping over layer sets
+    takes.
     """
     if defense is Defense.NONE:
         if layers:
@@ -346,15 +353,12 @@ def _resolve_defense_layers(
         return ()
     if layers is None:
         return DEFAULT_DEFENSE_LAYERS
-    known = {layer.value: layer for layer in DefenseLayer}
-    unknown = [str(name) for name in layers if str(name) not in known]
-    if unknown:
-        raise ValueError(
-            f"unknown defense layer(s) {', '.join(repr(u) for u in unknown)}; "
-            f"valid layers are: {_valid_layer_names()}"
-        )
-    selected = {known[str(name)] for name in layers}
-    return tuple(layer for layer in DefenseLayer if layer in selected)
+    if not layers:
+        # An empty SEQUENCE is the all-off control arm, already resolved - it is
+        # what parse_defense_layers("none") returns and what the CLI hands back.
+        # Re-parsing it would render as the empty spec "", which is an error.
+        return ()
+    return parse_defense_layers(",".join(str(name) for name in layers))
 
 
 def _defense_config(layers: Sequence[DefenseLayer]) -> DefenseConfig:
@@ -577,14 +581,27 @@ def _pipeline_name(
     the defense in this name the defended run would be served the baseline's cached
     results and report them as its own. That is the single most damaging cache hit
     available here, because the numbers it fabricates are exactly the numbers the
-    project exists to produce. Both the NAME and the exact LAYER SET are in the
-    digest: two arms of the ablation are two different measurements.
+    project exists to produce. The NAME, the exact LAYER SET and the arm's own
+    :attr:`DefenseConfig.label` are all in the digest: two arms of the ablation are
+    two different measurements, and the label is what carries anything the layer
+    set alone does not say - the spotlight STYLE, today fixed and tomorrow a flag.
 
-    The undefended name is byte-for-byte what it was before the defense seam was
-    filled: the defense parts are APPENDED only when a defense is actually on, so
-    an interrupted baseline can still be resumed against its own logs and the
-    recorded baseline artifact stays reproducible. Any defended run digests a
-    strictly longer payload, so it cannot collide with it.
+    THE MODEL IS DIGESTED, NOT ONLY NAMED. It appears as a readable token too, but
+    a token is not a discriminator: :func:`_sanitize_name` folds every character a
+    path dislikes into ``_``, so ``openai/gpt-oss-120b``, ``openai_gpt-oss-120b``
+    and ``openai:gpt-oss-120b`` used to produce one identical name AND one
+    identical digest - three different models, one cache entry. Digesting the raw
+    id costs nothing and closes that.
+
+    This last point moved the UNDEFENDED name, which had been byte-for-byte the
+    pre-defense formula so an interrupted baseline could resume against its own
+    logs. That was worth keeping and is worth less than a cache key that cannot
+    tell two models apart: a stale name only makes a re-run actually re-run, which
+    is the safe direction here, while a colliding one publishes one model's numbers
+    under another's. The gpt-oss-120b baseline's 31 task logs were copied onto the
+    new name rather than re-measured - the fingerprint moved, the runs did not -
+    which is the same thing the previous fingerprint change did; ``results/README.md``
+    records both.
 
     Deliberately NOT in the digest: ``min_request_interval_s``, which changes only
     the pacing of identical requests, and the task caps, which AgentDojo already
@@ -596,6 +613,7 @@ def _pipeline_name(
     effort_token = reasoning_effort if reasoning_effort is not None else _NO_EFFORT_TOKEN
     parts: list[object] = [
         str(provider),
+        model,
         effective_base_url,
         effective_timeout,
         reasoning_effort,
@@ -604,7 +622,7 @@ def _pipeline_name(
     tokens = [_PIPELINE_NAME_PREFIX, model, effort_token]
     if defense is not Defense.NONE:
         layer_token = "+".join(layer.value for layer in defense_layers) or _NO_LAYERS_TOKEN
-        parts.extend([str(defense), layer_token])
+        parts.extend([str(defense), layer_token, _defense_config(defense_layers).label])
         tokens.extend([str(defense), layer_token])
     tokens.append(_config_fingerprint(*parts))
     return _sanitize_name("-".join(tokens))
@@ -901,6 +919,12 @@ def run_baseline(
         "defense": built.defense,
         "defense_name": str(defense_enum),
         "defense_layers": [str(layer) for layer in resolved_layers],
+        # The string AgentDojo actually keyed on: its result cache and its per-task
+        # logs live under logdir/<pipeline_name>/. Without it in the file, no result
+        # can be tied back to the transcripts that produced it, and the cache-honesty
+        # machinery above (force_rerun, replayed) is auditable only from the console
+        # of the run that is already over.
+        "pipeline_name": built.pipeline.name,
         # The evidence AgentDojo's own booleans cannot carry; null when no gate ran.
         "gate_ledger": _ledger_summary(built.aegis) if built.aegis is not None else None,
         "max_tasks": max_tasks,
