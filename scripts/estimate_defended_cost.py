@@ -25,7 +25,7 @@ import pathlib
 import sys
 
 from aegis.domain.trust import Tainted
-from aegis.security.spotlight import Spotlighter, SpotlightStyle
+from aegis.security.spotlight import Spotlighter, SpotlightStyle, guidance_for_style
 
 # The undefended run's logs. Each file is one task run: a list of chat messages.
 LOGDIR = pathlib.Path("results/raw/agentdojo_logs")
@@ -33,6 +33,10 @@ LOGDIR = pathlib.Path("results/raw/agentdojo_logs")
 # Rough characters-per-token for English + JSON-ish tool payloads. Only used to
 # turn a character ratio into a token estimate; the RATIO is the measured part.
 CHARS_PER_TOKEN = 3.6
+
+# How a defended run's pipeline directory announces itself. The estimate is of
+# what defending WOULD cost, so it has to be taken from undefended transcripts.
+_DEFENDED_MARKER = "-aegis-"
 
 
 def _tool_outputs(messages: object) -> list[str]:
@@ -67,7 +71,30 @@ def main() -> int:
     marked_chars = 0
     outputs = 0
     samples: list[str] = []
-    for path in LOGDIR.rglob("*.json"):
+    # One logical task run can exist under SEVERAL pipeline directories: every time
+    # a fingerprint input changes, the previous directory is orphaned and its logs
+    # are copied to the new name rather than re-measured (see results/README.md).
+    # Walking the whole tree would then count the same measurement two or three
+    # times and quietly bias the ratio, so key on the path BELOW the pipeline
+    # directory - suite/user_task/attack/injection.json - which is the identity of
+    # the task run itself.
+    seen: set[str] = set()
+    for path in sorted(LOGDIR.rglob("*.json")):
+        try:
+            relative = path.relative_to(LOGDIR).as_posix()
+        except ValueError:
+            continue
+        pipeline, _, rest = relative.partition("/")
+        # Measure UNDEFENDED runs only. A defended run's logs are already
+        # spotlighted, so re-spotlighting them would mark marked text and report a
+        # cost nobody pays. The pipeline name carries the defense identity, which
+        # is what makes the two separable at all.
+        if _DEFENDED_MARKER in pipeline:
+            continue
+        identity = rest or relative
+        if identity in seen:
+            continue
+        seen.add(identity)
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -121,6 +148,17 @@ def main() -> int:
     print(f"raw tool-output tokens     : {raw_tokens:,}")
     print(f"spotlighted tokens         : {marked_tokens:,}")
     print(f"TOKEN inflation            : {token_ratio:.3f}x  ({(token_ratio - 1) * 100:+.1f}%)")
+    print()
+
+    # The other half of the defended arm's bill, and easy to forget because it is
+    # not in the tool output at all: L2 also appends the marker convention to the
+    # SYSTEM message, which is re-sent on every turn of every defended
+    # conversation. Small per turn, but the only question this script exists to
+    # answer is whether the arm fits inside a day of quota.
+    guidance_tokens = len(
+        enc.encode(guidance_for_style(SpotlightStyle.DATAMARK), disallowed_special=())
+    )
+    print(f"L2 system-message guidance : {guidance_tokens:,} tokens, per TURN")
     print()
     print(
         "A tool output is re-sent on every LATER turn of its conversation, so the token\n"
