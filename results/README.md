@@ -61,20 +61,61 @@ claim therefore needs at least 6 baseline hijacks, which at ASR ~12.5% means
 roughly 48+ couples per arm. On a 200k-token daily cap that is a multi-day
 measurement, not an afternoon.
 
-## Not measured yet: the defended arm
-
-`evals/agentdojo/defense.py` is wired and tested, and a defended run is invoked
-with:
+## `week0_defended_16.json` - the defended arm, on the same 16 couples
 
 ```
 python -m evals.agentdojo.runner --defense aegis --defense-layers all \
-    --max-tasks 3 --max-injection-tasks 4
+    --max-tasks 4 --max-injection-tasks 4 --out results/week0_defended_16.json
 ```
 
-No defended result exists in this directory, and **no reduction in ASR is
-claimed anywhere in this repository.** When one is recorded it must be compared
-against a baseline arm covering exactly the same couples, and reported with the
-discordant counts and the McNemar p-value, not as a bare percentage.
+`force_rerun: true`, `replayed: false`, 61 model requests - a fresh measurement,
+covering exactly the couples in `week0_baseline_16.json`, which is what makes the
+two pairable.
+
+```
+                       baseline        defended
+utility                  75.0%    ->     75.0%
+attack success rate      12.5%    ->      0.0%
+utility under attack     68.8%    ->     87.5%
+```
+
+The gate made 37 decisions and refused 5, on `send_email`, `delete_file` and
+`create_calendar_event`. No read-only tool was ever refused (`get_current_day`:
+6 allowed, 0 refused), and there were no guard, gate or quarantine failures.
+
+### What may NOT be concluded from it
+
+Every metric moves the right way and **not one of them is statistically
+significant.** Run the comparison and it says so itself:
+
+```
+python -m evals.stats.analysis --baseline results/week0_baseline_16.json \
+    --defended results/week0_defended_16.json
+```
+
+```
+asr   12.5% -> 0.0%   change -12.5 pp  95% CI [-37.5, +0.0] pp
+      discordant pairs: baseline-only 2, defended-only 0
+      McNemar exact p = 0.5000
+      POWER: 2 discordant pairs; fewer than 6 can never reach p < 0.05,
+             so this test could not have shown an effect.
+```
+
+Two hijacks became zero hijacks. That is 2 discordant pairs, and the exact
+McNemar test cannot return anything below p = 0.0625 until there are 6 - so
+p = 0.50 here is not evidence the defense failed, it is the absence of evidence
+either way. The same holds for the 18.8 pp gain in utility-under-attack
+(5 discordant pairs, p = 0.375).
+
+So the honest statement of this result is: **on 16 paired couples the defended
+arm blocked both observed hijacks at no measured utility cost, and the sample is
+too small to distinguish that from chance.** Getting to a claim worth making
+means more couples - roughly 48 per arm at this ASR - not a better-sounding
+sentence about these ones.
+
+`--defense-layers` also takes `spotlight`, `detect` and `gate` individually, so
+each layer's own contribution can be measured the same way. Those arms are not
+recorded yet.
 
 ## Runs that are NOT valid baselines
 
