@@ -782,6 +782,23 @@ def _without_own_args(error: Any, message: Any) -> str:
     that is what makes the echo recognisable at all - and anything left behind is no
     worse than not having tried. Values too short to be attributed anyway are left
     alone, because :func:`_appears_in` already refuses to trace taint to them.
+
+    THE RESIDUAL, STATED
+    --------------------
+    Subtraction can over-remove. An attack delivered ONLY through an error string,
+    whose wording happens to coincide with one of the agent's own arguments, has
+    that overlap blanked before L3 ever scans it, so it raises no flags. What is
+    NOT weakened is L2: the whole error, subtraction or not, is still fenced and
+    marked before the model reads it, and the gate still sees the call.
+
+    The trade is deliberate and measured, not a guess. ``runtime.run_function``
+    answers a call missing a required field with pydantic's ``ValidationError``,
+    which embeds the input dict verbatim - so folding the error in whole would
+    trace the agent's own CORRECTED retry argument back to "tool output", find it
+    high-risk, and refuse a benign task in the defended arm only. That is a utility
+    loss the undefended arm does not pay, i.e. a difference between the two arms
+    caused by the instrument rather than by the defense, which is the one kind of
+    error this project cannot afford to publish.
     """
     if not isinstance(error, str):
         return ""
