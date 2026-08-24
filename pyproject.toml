@@ -41,6 +41,9 @@ evals = [
     # External benchmark — we do not grade our own homework.
     # Verified to resolve on Python 3.13 / Windows (v0.1.35).
     "agentdojo>=0.1.35",
+    # Gemini 3.x needs the AI Studio genai SDK directly (AgentDojo's GoogleLLM
+    # is wrapped, not replaced, by evals/agentdojo/gemini_llm.py).
+    "google-genai>=1.0",
     "ranx>=0.3.20",
     "numpy>=1.26",
     "scipy>=1.12",
@@ -66,7 +69,7 @@ packages = ["src/aegis"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 addopts = "--strict-markers"
 markers = [
     "security: invariants that must hold for the threat model to be sound",
@@ -84,7 +87,15 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.mypy]
 python_version = "3.11"
-mypy_path = "src"
-packages = ["aegis"]
+mypy_path = ["src", "."]
+packages = ["aegis", "evals"]
 strict = true
 warn_unreachable = true
+
+# agentdojo ships no py.typed, and the top-level google namespace package is
+# only partially typed (google.genai carries py.typed and stays typed). These
+# overrides silence "missing stubs" for the untyped parts so mypy stays strict
+# on our own code without demanding stubs we do not own.
+[[tool.mypy.overrides]]
+module = ["agentdojo.*", "google.*"]
+ignore_missing_imports = true

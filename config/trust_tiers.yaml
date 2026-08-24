@@ -63,6 +63,13 @@ blocking_flags:
   - exfiltration_pattern
   - tool_invocation_attempt
   - credential_pattern
+  # Raised by L4 when the isolated quarantine extractor reports, as a typed
+  # boolean rather than as prose, that the untrusted text is addressing the
+  # agent. It is a model judgement made behind the dual-LLM boundary, so it is
+  # the highest-confidence signal available - hence it blocks. Its sibling
+  # `quarantine_unavailable` is deliberately NOT listed: an extractor outage
+  # must not silently turn into a blanket refusal of every side effect.
+  - quarantine_detected_instruction
 
 # ---------------------------------------------------------------------------
 # Tool policies.
@@ -96,7 +103,10 @@ tools:
     # Raw untrusted text must pass through quarantine before it can be
     # anywhere near an outbound message.
     min_arg_tier: T1_QUARANTINE_DERIVED
-    high_risk_args: [to, cc, bcc]
+    # `to` is our own vocabulary; `recipients` is what AgentDojo's workspace and
+    # travel suites name the same argument. Both are listed because a high-risk
+    # argument that is spelled differently by the deployment is an unguarded one.
+    high_risk_args: [to, cc, bcc, recipients]
     allowlists:
       # Empty by default: no attacker-influenced recipient is acceptable.
       # A deployment adds its own known-good addresses here.
@@ -117,10 +127,239 @@ tools:
   delete_file:
     side_effecting: true
     min_arg_tier: T3_USER
-    high_risk_args: [path]
+    # `path` is our vocabulary; `file_id` is AgentDojo's workspace spelling.
+    high_risk_args: [path, file_id]
     requires_confirmation: true
 
   post_message:
     side_effecting: true
     min_arg_tier: T1_QUARANTINE_DERIVED
     high_risk_args: [channel, recipient]
+
+# ---------------------------------------------------------------------------
+# AgentDojo benchmark tools (v1.2 workspace / banking / travel / slack).
+#
+# WHY EVERY TOOL IS LISTED, INCLUDING THE HARMLESS READS
+# ------------------------------------------------------
+# The gate fails closed: a tool with no policy is DENIED. That is the right
+# default for a deployment, but in a benchmark it means one forgotten read-only
+# tool silently drives utility to zero and the run still looks like a defensive
+# result. So the read-only tools are enumerated too, explicitly marked
+# `side_effecting: false`, and `tests/evals/test_defense.py` asserts that every
+# tool in every suite the harness can run has an entry here. Adding a suite means
+# adding its tools; the test says so before a run does.
+#
+# WHY THIS LIVES IN THE POLICY FILE AND NOT IN PYTHON
+# ---------------------------------------------------
+# "Which tools are sinks" is the single most consequential judgement the gate
+# makes, and it is exactly the kind of judgement a reviewer must be able to audit
+# without reading code. The adapter in evals/agentdojo/defense.py therefore
+# contains no list of tool names at all - it asks the loaded policy.
+#
+# THE CLASSIFICATION RULE APPLIED BELOW
+# -------------------------------------
+# side_effecting is true when the call changes state OUTSIDE the agent's own
+# context - it sends, writes, books, pays, deletes, or shares. Anything that only
+# reads is false, however sensitive what it reads may be: the worst case for a
+# poisoned read is a wrong answer, and refusing reads on taint destroys utility
+# while buying nothing (the gate's own `_check_flags` exempts read-only tools for
+# the same reason).
+#
+# Tools shared across suites (send_email, create_calendar_event, send_money,
+# read_file, delete_file) are declared ONCE above - re-declaring a key here would
+# silently override it, which is why they are absent from this section.
+# ---------------------------------------------------------------------------
+
+  # -- workspace: email ----------------------------------------------------
+  get_unread_emails:
+    side_effecting: false
+  get_sent_emails:
+    side_effecting: false
+  get_received_emails:
+    side_effecting: false
+  get_draft_emails:
+    side_effecting: false
+  search_emails:
+    side_effecting: false
+  search_contacts_by_name:
+    side_effecting: false
+  search_contacts_by_email:
+    side_effecting: false
+  delete_email:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [email_id]
+
+  # -- workspace / travel: calendar ----------------------------------------
+  get_current_day:
+    side_effecting: false
+  search_calendar_events:
+    side_effecting: false
+  get_day_calendar_events:
+    side_effecting: false
+  cancel_calendar_event:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [event_id]
+  reschedule_calendar_event:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [event_id]
+  add_calendar_event_participants:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    # Adding a participant is how a calendar tool becomes an exfiltration tool:
+    # the event body travels to whoever is on the invite.
+    high_risk_args: [event_id, participants]
+
+  # -- workspace: cloud drive ----------------------------------------------
+  search_files_by_filename:
+    side_effecting: false
+  get_file_by_id:
+    side_effecting: false
+  list_files:
+    side_effecting: false
+  search_files:
+    side_effecting: false
+  create_file:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [filename, content]
+  append_to_file:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [file_id, content]
+  share_file:
+    side_effecting: true
+    # The canonical exfiltration sink of the workspace suite: it hands a document
+    # to an address the agent chose.
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [file_id, email, permission]
+
+  # -- banking --------------------------------------------------------------
+  get_iban:
+    side_effecting: false
+  get_balance:
+    side_effecting: false
+  get_most_recent_transactions:
+    side_effecting: false
+  get_scheduled_transactions:
+    side_effecting: false
+  get_user_info:
+    side_effecting: false
+  schedule_transaction:
+    side_effecting: true
+    # Money, like send_money: only on data the human supplied.
+    min_arg_tier: T3_USER
+    high_risk_args: [recipient, amount]
+    requires_confirmation: true
+  update_scheduled_transaction:
+    side_effecting: true
+    min_arg_tier: T3_USER
+    high_risk_args: [id, recipient, amount]
+    requires_confirmation: true
+  update_password:
+    side_effecting: true
+    min_arg_tier: T3_USER
+    high_risk_args: [password]
+    requires_confirmation: true
+  update_user_info:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [first_name, last_name, street, city]
+
+  # -- travel: reads --------------------------------------------------------
+  get_user_information:
+    side_effecting: false
+  get_all_hotels_in_city:
+    side_effecting: false
+  get_hotels_prices:
+    side_effecting: false
+  get_rating_reviews_for_hotels:
+    side_effecting: false
+  get_hotels_address:
+    side_effecting: false
+  get_all_restaurants_in_city:
+    side_effecting: false
+  get_cuisine_type_for_restaurants:
+    side_effecting: false
+  get_restaurants_address:
+    side_effecting: false
+  get_rating_reviews_for_restaurants:
+    side_effecting: false
+  get_dietary_restrictions_for_all_restaurants:
+    side_effecting: false
+  get_contact_information_for_restaurants:
+    side_effecting: false
+  get_price_for_restaurants:
+    side_effecting: false
+  check_restaurant_opening_hours:
+    side_effecting: false
+  get_all_car_rental_companies_in_city:
+    side_effecting: false
+  get_car_types_available:
+    side_effecting: false
+  get_rating_reviews_for_car_rental:
+    side_effecting: false
+  get_car_fuel_options:
+    side_effecting: false
+  get_car_rental_address:
+    side_effecting: false
+  get_car_price_per_day:
+    side_effecting: false
+  get_flight_information:
+    side_effecting: false
+
+  # -- travel: bookings (these spend the user's money) ----------------------
+  reserve_hotel:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [hotel]
+  reserve_car_rental:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [company]
+  reserve_restaurant:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [restaurant]
+
+  # -- slack ----------------------------------------------------------------
+  get_channels:
+    side_effecting: false
+  read_channel_messages:
+    side_effecting: false
+  read_inbox:
+    side_effecting: false
+  get_users_in_channel:
+    side_effecting: false
+  get_webpage:
+    side_effecting: false
+  send_direct_message:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [recipient]
+  send_channel_message:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [channel]
+  add_user_to_channel:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [user, channel]
+  invite_user_to_slack:
+    side_effecting: true
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [user, user_email]
+  remove_user_from_slack:
+    side_effecting: true
+    # Irreversible from the agent's side, so it joins money and deletion in
+    # demanding a human in the loop.
+    min_arg_tier: T3_USER
+    high_risk_args: [user]
+    requires_confirmation: true
+  post_webpage:
+    side_effecting: true
+    # Writing to a URL the agent chose is exfiltration with extra steps.
+    min_arg_tier: T1_QUARANTINE_DERIVED
+    high_risk_args: [url, content]

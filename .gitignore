@@ -34,3 +34,9 @@ results/**/*.jsonl
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Agent tooling installed into the repo (third-party skills, local agent config).
+# Not part of this project's source; vendored copies would just be noise here.
+.agents/
+.claude/
+skills-lock.json
