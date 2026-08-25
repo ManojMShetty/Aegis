@@ -32,16 +32,19 @@ from collections.abc import Iterator
 
 import pytest
 
-from aegis.config.sandbox import scan_environment
+from aegis.config.sandbox import MODEL_PROVIDER_ENV_VARS, scan_environment
 
-# Every variable any provider in this repo will read a key from. Adding a
-# provider means adding its variable here; the names are variable NAMES and
-# carry no secret.
-API_KEY_ENV_VARS = (
-    "GROQ_API_KEY",
-    "GEMINI_API_KEY",
-    "NVIDIA_API_KEY",
-)
+# Every variable any provider in this repo will read a key from.
+#
+# Derived from the sandbox guard's own list rather than retyped, because the two
+# drifting apart is a silent hole rather than a visible failure: a provider added
+# to the runner with a new key variable would still be recognised as model-side by
+# the tripwire (so no refusal) while this list, unaware of it, would leave the real
+# key in the environment for every offline test. The stripping and the allowing
+# have to be answers to the same question.
+#
+# The names are variable NAMES and carry no secret. Sorted for a stable order.
+API_KEY_ENV_VARS: tuple[str, ...] = tuple(sorted(MODEL_PROVIDER_ENV_VARS))
 
 
 @pytest.fixture(autouse=True)

@@ -34,9 +34,14 @@ than one that describes nothing, because a reader budgets trust against it.
 
 **Enforced now.** Each sentence names the test that fails if it stops being true.
 
-- **No real tools exist.** There are no real tool implementations in this repository to
-  invoke, with or without a credential. The agent under test drives AgentDojo's mock
-  suites, whose side-effecting tools mutate an in-memory environment.
+- **No real tools exist, and none can be added unguarded.** There are no real tool
+  implementations in this repository to invoke, with or without a credential; the agent
+  under test drives AgentDojo's mock suites, whose side-effecting tools mutate an
+  in-memory environment. The import guard below protects only modules that call it, so a
+  second rule requires every module in `aegis.tools` to call it at import scope - adding
+  an unguarded tool means deleting a test that says you may not.
+  *Proved by* `test_every_module_in_aegis_tools_calls_the_guard` and its paired negative
+  `test_the_guard_coverage_check_would_catch_an_unguarded_module`.
 - **The offline test suite cannot reach a provider.** `tests/conftest.py` strips
   `GROQ_API_KEY`, `NVIDIA_API_KEY` and `GEMINI_API_KEY` from the environment for every
   non-costly test, so a test that regressed into making a real call fails instead of

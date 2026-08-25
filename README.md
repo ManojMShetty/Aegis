@@ -312,7 +312,7 @@ is scaffolding.
 
 ## Status
 
-**All five security layers (L1-L5) + retrieval core: complete and verified.** 558 offline
+**All five security layers (L1-L5) + retrieval core: complete and verified.** 618 offline
 tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
 database dependencies - pydantic and PyYAML only - and runs with no API key, no network
 and no database.

@@ -419,3 +419,75 @@ def test_compose_file_validates_against_the_docker_cli() -> None:
         pytest.fail(f"docker compose config rejected the file:\n{completed.stderr}")
     rendered = yaml.safe_load(completed.stdout)
     assert rendered["networks"]["lab"]["internal"] is True
+
+
+# ---------------------------------------------------------------------------
+# The guard's coverage, not just its behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_every_module_in_aegis_tools_calls_the_guard() -> None:
+    """A guard nobody is obliged to call protects only the authors who remember.
+
+    `require_real_tools_enabled` genuinely blocks the import of a module that
+    invokes it - there are tests above for that. What it cannot do by itself is
+    stop the NEXT real tool from simply not calling it: an unguarded module
+    dropped into this package imports cleanly with the escape hatch off, and
+    every other test in this file still passes, because they all exercise the
+    one module that opts in.
+
+    That gap is what makes SECURITY.md's "no real tools exist" bullet the only
+    enforced claim with nothing under it. This closes it structurally: every
+    module in the package must invoke the guard at import scope, so the way to
+    add an unguarded tool is to delete a test that says you may not.
+
+    Kept as source inspection rather than an import: importing each module to
+    find out whether it is guarded would run the very code the guard exists to
+    keep out of the process.
+    """
+    package = REPO_ROOT / "src" / "aegis" / "tools"
+    exempt = {"__init__.py", "guard.py"}
+
+    unguarded = [
+        path.name
+        for path in sorted(package.glob("*.py"))
+        if path.name not in exempt
+        and "require_real_tools_enabled(" not in path.read_text(encoding="utf-8")
+    ]
+
+    assert not unguarded, (
+        "every module in aegis.tools must call require_real_tools_enabled() at import "
+        f"scope; these do not: {unguarded}. A real tool that skips the guard is a real "
+        "tool the escape hatch does not gate."
+    )
+
+
+def test_the_guard_coverage_check_would_catch_an_unguarded_module(tmp_path: Path) -> None:
+    """The paired negative: prove the check above is not vacuously true.
+
+    It currently passes because the package holds one module and that module is
+    guarded. A check that would also pass over an unguarded module would be
+    worthless, so run the same rule against a package that has one.
+    """
+    package = tmp_path / "tools"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "guard.py").write_text("def require_real_tools_enabled(name): ...", encoding="utf-8")
+    (package / "real_example.py").write_text(
+        "from aegis.tools.guard import require_real_tools_enabled\n"
+        "require_real_tools_enabled(__name__)\n",
+        encoding="utf-8",
+    )
+    (package / "real_smtp.py").write_text("import socket\n", encoding="utf-8")
+
+    exempt = {"__init__.py", "guard.py"}
+    unguarded = [
+        path.name
+        for path in sorted(package.glob("*.py"))
+        if path.name not in exempt
+        and "require_real_tools_enabled(" not in path.read_text(encoding="utf-8")
+    ]
+
+    assert unguarded == ["real_smtp.py"], (
+        "the coverage rule must flag a module that does not call the guard, or it is not a rule"
+    )
