@@ -179,6 +179,76 @@ four of the six. Which
 tasks are included changes what is measurable, so a wider sweep is not simply more of the
 same.
 
+### Retrieval quality: the arms, measured - and hybrid does not win
+
+`aegis.retrieval` exposes `bm25`, `vector` and `hybrid` (RRF) as values of one
+`RetrievalConfig`, so the folklore claim "hybrid retrieval is the biggest quality win in a
+RAG pipeline" could be *measured* rather than repeated. It was measured. On this corpus it
+is not true.
+
+```bash
+uv run python -m evals.retrieval.run      # offline, no key, under a second
+```
+
+| Arm | hit@5 | recall@5 | precision@5 | MRR@5 | nDCG@5 |
+|---|---|---|---|---|---|
+| `bm25` (baseline) | 0.880 (22/25) | 0.840 | 0.176 | 0.700 | 0.721 |
+| `vector` (TF-IDF cosine) | 0.880 (22/25) | 0.840 | 0.176 | **0.733** | **0.746** |
+| `hybrid` (RRF) | 0.880 (22/25) | 0.840 | 0.176 | 0.713 | 0.731 |
+
+hit@5 is the only per-query Bernoulli trial here, so it is the only column with an
+interval: **95% Wilson CI [70.0%, 95.8%]**, identical for all three arms. Exact McNemar on
+hit@5, hybrid versus BM25: **0 discordant pairs, p = 1.0000** - and the tool prints
+"could not have reached p < 0.05" beside it, because at this size p = 1 is not evidence of
+equivalence. The other four columns are macro-averages of bounded scores, not proportions;
+no binomial interval is offered for them, because that would be the wrong distribution.
+
+**What the table actually says.**
+
+- **Fusion did not beat its better input.** BM25 0.721 < hybrid 0.731 < vector 0.746 on
+  nDCG@5. RRF *averaged* the two rankings; it did not complement them. That is the
+  expected outcome when both arms are lexical - BM25 over stems and TF-IDF cosine over
+  *the same* stems fail on the same queries, and RRF cannot promote a chunk that neither
+  arm surfaced. The win hybrid is famous for needs a genuinely *semantic* second arm, and
+  this repository deliberately ships none (no numpy, no torch, no sentence-transformers).
+- **All three arms miss the same three queries**, for three different reasons - which is
+  the useful part of a small fixture:
+  - `q02` *"what happens when my card is declined"* - the answering section says "when a
+    charge fails" and shares no content word with the query. Vocabulary mismatch, the
+    failure a real embedding model exists to fix.
+  - `q08` *"rotate an api key without downtime"* - the shared tokenizer stems the
+    document's *rotating* to `rotat` but leaves the query's *rotate* untouched, so the two
+    never meet. A stemmer asymmetry in `aegis.retrieval.sparse`; the eval found it and
+    nothing else would have.
+  - `q13` *"how do I check a webhook really came from you"* - the correct chunk never
+    contains the word *webhook*. That word is in the document title, which sectioning
+    leaves out of the chunk body. Context stripped by chunking, the classic RAG defect.
+- **There is no `hybrid+rerank` row, deliberately.** The only shipped reranker is
+  `IdentityReranker`, a seam for a cross-encoder this repository cannot run without torch.
+  While that is the only implementation, `hybrid+rerank` *is* `hybrid`, so a row for it
+  would be a row for nothing - and it previously produced one, complete with its own
+  confidence interval and a McNemar block reading `p = 1.0000, discordant 0 / 0`, which
+  reads as "reranking tested, no difference" when nothing had been tested. The seam is
+  still covered by a test asserting the two configurations score identically; that is
+  where a claim about a seam belongs.
+
+**And what it does not say.** The golden set is
+[`evals/retrieval/golden_set.json`](evals/retrieval/golden_set.json): 25 queries over 44
+chunks of an invented product's documentation, hand-written **by the authors of the
+retriever it grades**. A fixture this small cannot support a strong claim about anything -
+the hit@5 interval alone spans 26 points, and *every* arm-versus-arm test on it is
+underpowered by construction, since fewer than 6 discordant pairs can never reach
+p < 0.05. It is a working-pipeline check and an arm-versus-arm sanity comparison, not a
+benchmark result. BEIR, MS MARCO and LoTTE are the external standards; none of them runs
+offline in CI with no download, which is why this fixture exists - and why the CLI prints
+that caveat under every table it produces.
+
+The metrics are hand-written stdlib arithmetic in
+[`evals/retrieval/metrics.py`](evals/retrieval/metrics.py), pinned against worked examples
+the same way the Wilson interval is pinned against Newcombe. Binary relevance, the
+`log2(i+1)` discount, and one opinionated contract: a query with no relevant documents is
+**undefined**, not 0.0, on every metric - and the loader refuses to accept one at all.
+
 ### What is not measured
 
 - **The defended arm at 32 couples.** It is partly measured and stopped against Groq's
@@ -189,6 +259,12 @@ same.
 - **The per-layer ablation.** `--defense-layers` also accepts `spotlight`, `detect` and
   `gate` individually, so each layer's own contribution can be measured the same way.
   Those arms have not been run.
+- **Retrieval with a real embedding model.** The `vector` arm above is TF-IDF cosine -
+  lexical-semantic, not neural. It does not know that *car* and *automobile* are related,
+  and the three missed queries are exactly where that costs. A sentence-transformer arm and
+  a cross-encoder reranker are the obvious next measurement and would need the ML stack
+  this repository does not install; `Embedder` and `Reranker` are Protocols so that
+  swapping one in is a constructor argument, not a rewrite.
 - **Cost.** One figure is measured: datamarking with the private-use codepoint `U+E000`
   costs **+66% in tokens** (1.664x; 95 tool outputs, 19,412 -> 32,297 tokens) while
   costing about **+7% in characters**, because a private-use codepoint has no tokenizer
@@ -228,6 +304,10 @@ uv run python -m evals.stats.analysis \
 
 # the token cost of datamarking: offline, no key, no charge
 uv run --with tiktoken python scripts/estimate_defended_cost.py
+
+# the retrieval ablation: offline, no key, no charge, under a second
+uv run python -m evals.retrieval.run
+uv run python -m evals.retrieval.run --k 10 --per-query
 ```
 
 ## Measurement integrity
@@ -312,8 +392,8 @@ is scaffolding.
 
 ## Status
 
-**All five security layers (L1-L5) + retrieval core: complete and verified.** 618 offline
-tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
+**All five security layers (L1-L5) + retrieval core + retrieval eval: complete and
+verified.** 757 offline tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
 database dependencies - pydantic and PyYAML only - and runs with no API key, no network
 and no database.
 
@@ -337,6 +417,10 @@ and no database.
 - [x] Defense off vs on, paired at 16 couples: recorded, and not significant
 - [ ] Defense off vs on at 32 couples *(stopped by the daily token cap, not by a bug)*
 - [ ] Per-layer ablation: `spotlight` / `detect` / `gate` measured separately
+- [x] Retrieval eval - recall@k / precision@k / MRR@k / nDCG@k, a committed golden set,
+      and the four-arm ablation in one offline command
+- [x] Measured: **hybrid does not beat BM25 on this fixture** - RRF lands between its two
+      lexical inputs rather than above them, and the table says so
 - [ ] Dense retrieval (embeddings) + cross-encoder rerank *(needs the ML stack)*
 - [ ] LangGraph wiring
 

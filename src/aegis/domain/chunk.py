@@ -53,6 +53,22 @@ class Chunk:
         return f"{self.doc_id}#{self.ordinal}:{sha256_of(self.value)[:12]}"
 
     @property
+    def searchable_text(self) -> str:
+        """What an index should see for this chunk: heading, then body.
+
+        The heading is strong signal about what a chunk is *about* and is
+        prepended for scoring only - it is never written back onto the text, so
+        the cited content stays exactly what the document said.
+
+        It lives here rather than inside one index because every retriever must
+        agree on it. If BM25 indexed the heading and the vector index did not,
+        the two arms would score different documents and fusion would combine
+        rankings built over different corpora - a defect that never shows up as
+        an error, only as quietly worse recall.
+        """
+        return f"{self.heading} {self.value}" if self.heading else self.value
+
+    @property
     def is_attacker_influenced(self) -> bool:
         return self.text.is_attacker_influenced
 

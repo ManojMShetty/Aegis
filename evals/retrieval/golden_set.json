@@ -1,0 +1,255 @@
+{
+  "name": "meridian-support-kb-v1",
+  "description": "A hand-built fixture, not an external benchmark. Twenty-five queries over ten short documents about an invented product, written by the authors of the retriever they grade. Use it to check that the pipeline works and that the arms differ - never as evidence of how this system would rank real traffic. BEIR / MS MARCO / LoTTE are the external standards; none of them runs offline in CI with no download, which is the only reason this file exists.",
+  "chunker": {
+    "max_tokens": 512,
+    "overlap_tokens": 64,
+    "respect_headings": true
+  },
+  "documents": [
+    {
+      "doc_id": "billing.md",
+      "text": "# Meridian billing\n\n## Payment methods\nMeridian accepts credit cards and, on annual plans, bank transfer. A card is\ncharged in the currency of the workspace. Adding a second card does not change\nwhich one is charged: the primary card is used until you promote another one.\n\n## Invoice schedule\nInvoices are issued on the first day of each billing period and fall due within\nfourteen days. The invoice PDF is attached to the notification email and is also\navailable under Settings, Billing, Invoices.\n\n## Refunds and credits\nA refund returns money to the original payment method and takes five to ten\nbusiness days to appear. A credit is applied to the next invoice instead and is\nimmediate. Support can issue a credit; only an owner can request a refund.\n\n## Failed payments\nWhen a charge fails, Meridian retries after one, three and seven days. The\nworkspace stays active during that window. After the third failure the workspace\ndrops to the free tier and existing keys keep working at free-tier quotas.\n\n## Changing your plan\nAn upgrade takes effect at once and is prorated against the days remaining in the\nperiod, so you are never charged twice for the same days. A downgrade takes\neffect at the end of the current period and you keep paid features until then.\n"
+    },
+    {
+      "doc_id": "auth.md",
+      "text": "# Authentication\n\n## API keys\nAn API key is a bearer token sent in the Authorization header. Keys are scoped to\none workspace and one environment. A key is shown once, at creation: Meridian\nstores only a hash of it, so a key you did not copy cannot be shown again and has\nto be replaced.\n\n## Rotating a key\nCreate the replacement first, deploy it everywhere, and only then revoke the old\none. Revocation takes effect at once and cannot be undone. Holding both keys\nvalid for a window is what avoids a gap in service.\n\n## OAuth device flow\nA machine with no browser authenticates with the device flow: the client prints a\nshort code and a URL, a human approves it elsewhere, and the client exchanges the\ncode for a token. The code expires after ten minutes.\n\n## Session lifetime\nA browser session lasts thirty days and is extended on use. Signing out on one\ndevice leaves the others signed in; use Revoke all sessions for that.\n\n## Two-factor authentication\nTime-based one-time passwords and hardware security keys are both supported. An\nowner can require two-factor for every member, which signs out the members who\nhave not yet enrolled.\n"
+    },
+    {
+      "doc_id": "errors.md",
+      "text": "# Error codes\n\n## ERR_4021 rate limit exceeded\nThe workspace has spent its request budget for the current window. The response\ncarries a Retry-After header in seconds. Retrying before that header expires does\nnot reset the window and does not help.\n\n## ERR_4010 invalid credential\nThe bearer token was missing, malformed or revoked. This is not a permission\nproblem: the request was never associated with a workspace at all.\n\n## ERR_4033 permission denied\nThe credential is valid, but the role attached to it may not perform this action.\nCheck the role the key was created with, not the key itself.\n\n## ERR_5002 upstream timeout\nA dependency did not answer within the deadline. This is a server-side fault and\nis safe to retry with backoff, because the request was not applied.\n\n## Retry guidance\nRetry ERR_5002 with backoff, and ERR_4021 after Retry-After. Never retry ERR_4010\nor ERR_4033 unchanged, because nothing about the request will have changed.\n"
+    },
+    {
+      "doc_id": "rate_limits.md",
+      "text": "# Rate limits\n\n## Default quotas\nThe free tier allows sixty requests per minute per workspace. The team tier\nallows six hundred per minute, and enterprise is negotiated. Quotas are counted\nper workspace and not per key, so issuing more keys does not buy more capacity.\n\n## Burst allowance\nA token bucket refills continuously and holds up to twice the per-minute quota,\nso a short spike is absorbed. Traffic that stays above the quota is rejected once\nthe bucket empties.\n\n## How limits are counted\nEvery accepted request costs one token. Rejected requests cost nothing. A\nstreaming response is counted once, at the moment the stream opens, however long\nit stays open.\n\n## Requesting a higher limit\nAn owner can ask for an increase from Settings, Usage. Say what sustained rate\nyou need and over what window. Increases are granted for one named environment\nrather than for the whole account.\n"
+    },
+    {
+      "doc_id": "webhooks.md",
+      "text": "# Webhooks\n\n## Registering an endpoint\nRegister one HTTPS URL per environment. Meridian sends a POST with a JSON body\nand expects a 2xx within five seconds. An endpoint that answers slowly is treated\nexactly like one that answers with an error.\n\n## Signature verification\nEvery delivery carries a signature header, computed as HMAC-SHA256 over the raw\nrequest body with the endpoint secret. Verify against the raw bytes: parsing the\nJSON and serialising it again changes the body, and the signature will not match.\n\n## Retry and backoff\nA failed delivery is retried with exponential backoff for twenty-four hours.\nAfter that the delivery is dropped and the endpoint is marked unhealthy until you\nre-enable it.\n\n## Replay protection\nThe signature header includes a timestamp. Reject any delivery whose timestamp is\nmore than five minutes old, or a captured request can be sent to you again later\nand will still verify.\n"
+    },
+    {
+      "doc_id": "sso.md",
+      "text": "# Single sign-on\n\n## SAML setup\nUpload the identity provider metadata XML, then configure the assertion consumer\nservice URL that Meridian shows you. The email claim is the join key, so the\naddress in the directory has to match the address on the member.\n\n## SCIM provisioning\nSCIM keeps the member list in step with the directory: creating a user there\ncreates a member here, and deactivating one there takes that member's access\naway. SCIM needs its own token, separate from any API key.\n\n## Just-in-time creation\nWithout SCIM, a member is created the first time they sign in through the\nidentity provider. Just-in-time creation can only add people, never take anyone\naway, which is why offboarding needs SCIM.\n\n## Disabling password login\nOnce single sign-on is enforced, password login is refused for everyone except\nbreak-glass owners, who keep it so that a broken identity provider cannot shut\nthe whole workspace out.\n"
+    },
+    {
+      "doc_id": "export.md",
+      "text": "# Data export and deletion\n\n## Requesting an export\nAn owner starts an export from Settings, Data. The job runs in the background and\nthe notification email carries a signed download link when it finishes.\n\n## Export formats\nExports are newline-delimited JSON, one record per line, gzipped. CSV is offered\nfor tabular resources only, because a nested record cannot be written to CSV\nwithout losing its structure.\n\n## Retention of export files\nA download link stays valid for seven days, after which the file is removed from\nstorage. Starting a new export does not extend the life of an older file.\n\n## Deleting your data\nDeleting a workspace schedules erasure after a thirty-day grace period, and an\nowner can cancel at any point inside it. Once the grace period ends the data\ncannot be brought back by anyone, support included.\n"
+    },
+    {
+      "doc_id": "cli.md",
+      "text": "# The Meridian command line tool\n\n## Installing the tool\nInstall from your platform package manager, or download the static binary. The\nbinary carries no runtime dependencies, so it can be dropped straight onto a\nbuild image without installing a language runtime first.\n\n## Logging in\nRun meridian login to start the device flow. In continuous integration, where\nnobody can approve a code, set MERIDIAN_TOKEN in the environment instead.\n\n## The deploy command\nmeridian deploy uploads the build and shifts traffic once the health check\npasses. Pass --environment to aim at somewhere other than production.\n\n## The logs command\nmeridian logs streams from the selected environment and accepts --since and\n--grep. A stream counts as one request against the rate limit.\n\n## The configuration file\nmeridian.toml at the repository root holds the default environment and the health\ncheck path. A flag on the command line always beats the file.\n"
+    },
+    {
+      "doc_id": "deploy.md",
+      "text": "# Deployments\n\n## Environments\nEvery workspace has production and staging, and can add named preview\nenvironments. An API key belongs to exactly one of them, which is what stops a\nstaging key from reaching production data.\n\n## Zero-downtime releases\nA release starts new instances beside the old ones and shifts traffic only after\nthe new instances report healthy. Old instances are drained rather than killed,\nso requests already in flight finish normally.\n\n## Health checks\nThe health check path is polled every ten seconds and has to answer 200 within\ntwo seconds. Three consecutive failures mark an instance unhealthy and take it\nout of rotation.\n\n## Rolling back\nA rollback re-points traffic at the previous release, which is kept warm for one\nhour after a deploy. After that hour it becomes an ordinary deploy of the older\nbuild and takes just as long as one.\n"
+    },
+    {
+      "doc_id": "incidents.md",
+      "text": "# Incident response\n\n## Severity levels\nSeverity one is a full outage or a confirmed data exposure. Severity two is a\ndegraded service with a workaround. Severity three is a defect with no customer\nimpact and is handled in the ordinary queue.\n\n## Paging on call\nSeverity one and severity two reach the on-call engineer immediately, at any hour\nof the day or night. Severity three never does. Anyone may raise the severity of\nan incident; only the incident commander may lower it.\n\n## Status page updates\nThe status page is updated within fifteen minutes of a severity-one declaration\nand every thirty minutes after that until it is resolved, even when there is\nnothing new to say.\n\n## Postmortems\nEvery severity-one incident gets a written postmortem within five working days. A\npostmortem names causes and never names a person as one.\n"
+    }
+  ],
+  "queries": [
+    {
+      "id": "q01",
+      "query": "how long does a refund take to come back",
+      "relevant_chunk_ids": [
+        "billing.md#2"
+      ],
+      "note": "Only the refunds section states the five-to-ten-day figure. One of the two queries where the arms disagree: measured at k=5 the vector arm puts it first, BM25 third, and fusion second."
+    },
+    {
+      "id": "q02",
+      "query": "what happens when my card is declined",
+      "relevant_chunk_ids": [
+        "billing.md#3"
+      ],
+      "note": "The dunning section is the answer and shares not one content word with the query - it says 'When a charge fails'. Kept deliberately: measured at k=5, every lexical arm misses it, and a fixture with no misses in it would be measuring the labeller rather than the retriever."
+    },
+    {
+      "id": "q03",
+      "query": "if I upgrade halfway through the month am I charged twice",
+      "relevant_chunk_ids": [
+        "billing.md#4"
+      ],
+      "note": "Proration is answered only under 'Changing your plan', which spells out 'never charged twice for the same days'."
+    },
+    {
+      "id": "q04",
+      "query": "ERR_4021",
+      "relevant_chunk_ids": [
+        "errors.md#0"
+      ],
+      "note": "A bare identifier: the case BM25 exists for. The rate-limit doc explains the same behaviour but the error reference is what the query asks for."
+    },
+    {
+      "id": "q05",
+      "query": "my key is valid but the call is refused",
+      "relevant_chunk_ids": [
+        "errors.md#2"
+      ],
+      "note": "ERR_4033 is role-based refusal; ERR_4010 (invalid credential) is the distractor and shares most of its vocabulary."
+    },
+    {
+      "id": "q06",
+      "query": "which failures are safe to retry",
+      "relevant_chunk_ids": [
+        "errors.md#4"
+      ],
+      "note": "The retry guidance section; every other section mentions retrying too."
+    },
+    {
+      "id": "q07",
+      "query": "I lost my api key can I look it up again",
+      "relevant_chunk_ids": [
+        "auth.md#0"
+      ],
+      "note": "Answered by 'stores only a hash of it', with no shared wording."
+    },
+    {
+      "id": "q08",
+      "query": "rotate an api key without downtime",
+      "relevant_chunk_ids": [
+        "auth.md#1"
+      ],
+      "note": "A measured miss for both arms, and an instructive one. The shared tokenizer stems 'rotating' (in the heading) to 'rotat' but leaves the query's 'rotate' alone, so the two never meet; 'downtime' is 'a gap in service' in the text. Both arms return the neighbouring 'API keys' section instead. The label stays where it is: the rotation section is the answer whether or not the retriever can find it."
+    },
+    {
+      "id": "q09",
+      "query": "sign in from a machine with no browser",
+      "relevant_chunk_ids": [
+        "auth.md#2",
+        "cli.md#1"
+      ],
+      "note": "The device flow, and the command that starts it. Both genuinely answer."
+    },
+    {
+      "id": "q10",
+      "query": "how many requests per minute on the team plan",
+      "relevant_chunk_ids": [
+        "rate_limits.md#0"
+      ],
+      "note": "The quota table section."
+    },
+    {
+      "id": "q11",
+      "query": "does issuing more keys give us more capacity",
+      "relevant_chunk_ids": [
+        "rate_limits.md#0"
+      ],
+      "note": "Same section, different question; the answer sentence is explicit."
+    },
+    {
+      "id": "q12",
+      "query": "is a slow endpoint treated as a failure",
+      "relevant_chunk_ids": [
+        "webhooks.md#0"
+      ],
+      "note": "Stated directly in the registration section."
+    },
+    {
+      "id": "q13",
+      "query": "how do I check a webhook really came from you",
+      "relevant_chunk_ids": [
+        "webhooks.md#1"
+      ],
+      "note": "The third measured miss, and the one that is about chunking rather than vocabulary: the signature-verification section never contains the word 'webhook' - that word is in the document title, which sectioning leaves out of the body. A chunk stripped of the context that named it is the classic retrieval failure, so it is in the fixture on purpose."
+    },
+    {
+      "id": "q14",
+      "query": "stop someone replaying a captured delivery",
+      "relevant_chunk_ids": [
+        "webhooks.md#3"
+      ],
+      "note": "Replay protection via the timestamp."
+    },
+    {
+      "id": "q15",
+      "query": "remove access when an employee leaves",
+      "relevant_chunk_ids": [
+        "sso.md#1",
+        "sso.md#2"
+      ],
+      "note": "SCIM does deprovisioning; the just-in-time section says why it cannot."
+    },
+    {
+      "id": "q16",
+      "query": "what stops us being locked out if the identity provider breaks",
+      "relevant_chunk_ids": [
+        "sso.md#3"
+      ],
+      "note": "Break-glass owners keep password login."
+    },
+    {
+      "id": "q17",
+      "query": "how long is the export download link good for",
+      "relevant_chunk_ids": [
+        "export.md#2"
+      ],
+      "note": "Seven days, in the retention section."
+    },
+    {
+      "id": "q18",
+      "query": "can I undo deleting a workspace",
+      "relevant_chunk_ids": [
+        "export.md#3"
+      ],
+      "note": "The thirty-day grace period."
+    },
+    {
+      "id": "q19",
+      "query": "why is my export not a csv file",
+      "relevant_chunk_ids": [
+        "export.md#1"
+      ],
+      "note": "The formats section explains the nested-record reason."
+    },
+    {
+      "id": "q20",
+      "query": "roll back a bad release",
+      "relevant_chunk_ids": [
+        "deploy.md#3"
+      ],
+      "note": "Both content terms are in the rollback section."
+    },
+    {
+      "id": "q21",
+      "query": "when does an instance get taken out of rotation",
+      "relevant_chunk_ids": [
+        "deploy.md#2"
+      ],
+      "note": "Three consecutive health check failures."
+    },
+    {
+      "id": "q22",
+      "query": "target staging instead of production from the command line",
+      "relevant_chunk_ids": [
+        "cli.md#2"
+      ],
+      "note": "The --environment flag on deploy; the deployments doc talks about environments at length and is the distractor that every arm ranks first. The second query where the arms disagree below rank 1."
+    },
+    {
+      "id": "q23",
+      "query": "does the tool need a language runtime installed",
+      "relevant_chunk_ids": [
+        "cli.md#0"
+      ],
+      "note": "'no runtime dependencies ... without installing a language runtime'."
+    },
+    {
+      "id": "q24",
+      "query": "who gets woken up in the middle of the night",
+      "relevant_chunk_ids": [
+        "incidents.md#1"
+      ],
+      "note": "A near miss worth keeping: 'night' is the ONLY term the query and the answer share, and on that single term both arms rank the paging section third rather than first. Lexical retrieval scraping through on one word is not the same thing as lexical retrieval working."
+    },
+    {
+      "id": "q25",
+      "query": "how often do we update the status page during an outage",
+      "relevant_chunk_ids": [
+        "incidents.md#2"
+      ],
+      "note": "Fifteen minutes, then every thirty."
+    }
+  ]
+}

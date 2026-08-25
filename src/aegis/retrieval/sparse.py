@@ -43,7 +43,15 @@ from collections.abc import Iterable, Sequence
 
 from aegis.domain.chunk import Chunk, ScoredChunk
 
-__all__ = ["BM25Index", "stem", "tokenize"]
+__all__ = ["SPARSE_RETRIEVER", "BM25Index", "stem", "tokenize"]
+
+SPARSE_RETRIEVER = "bm25"
+"""Name this index tags its results with, and the key fusion sees it under.
+
+A constant rather than a literal because the retriever, the fusion weights and
+the ablation table all have to spell it the same way; a typo in a weights dict
+silently applies the default weight instead of raising.
+"""
 
 _TOKEN = re.compile(r"[a-z0-9_]+")
 
@@ -137,10 +145,10 @@ class BM25Index:
     def add(self, chunks: Iterable[Chunk]) -> None:
         """Index chunks. Safe to call repeatedly; statistics are recomputed."""
         for chunk in chunks:
-            # The heading is prepended for scoring only - it is strong signal
-            # about what a chunk is *about*, and is not stored back onto the text.
-            searchable = f"{chunk.heading} {chunk.value}" if chunk.heading else chunk.value
-            tokens = tokenize(searchable)
+            # Chunk.searchable_text prepends the heading for scoring only. It is
+            # a property of the chunk rather than of this index precisely so the
+            # vector index sees the identical text (see aegis.domain.chunk).
+            tokens = tokenize(chunk.searchable_text)
             self._chunks.append(chunk)
             self._tokens.append(tokens)
             self._freqs.append(Counter(tokens))
@@ -183,7 +191,7 @@ class BM25Index:
                 denom = f + self.k1 * (1.0 - self.b + self.b * length / (self._avg_len or 1.0))
                 score += self._idf(term) * (f * (self.k1 + 1.0)) / denom
             if score > 0.0:
-                scored.append(ScoredChunk(chunk=chunk, score=score, retriever="bm25"))
+                scored.append(ScoredChunk(chunk=chunk, score=score, retriever=SPARSE_RETRIEVER))
 
         scored.sort(key=lambda s: (-s.score, s.chunk.chunk_id))
         return scored[:top_k]
