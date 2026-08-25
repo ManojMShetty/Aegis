@@ -117,6 +117,52 @@ sentence about these ones.
 each layer's own contribution can be measured the same way. Those arms are not
 recorded yet.
 
+## `week0_baseline_wide.json` - 32 couples, and the reason it matters
+
+The same configuration at `--max-tasks 8 --max-injection-tasks 4`.
+
+```
+utility               87.5%    7/8    95% CI [52.9%, 97.8%]
+asr                   18.8%   6/32    95% CI [ 8.9%, 35.3%]
+utility_under_attack  65.6%  21/32    95% CI [48.3%, 79.6%]
+```
+
+**Six hijacks is the number that unlocks the comparison.** Exact McNemar cannot
+return below p = 0.0625 until there are 6 discordant pairs; at 6 the floor is
+p = 0.03125. So a defended arm over these same 32 couples can, for the first
+time, produce a significant result - where the 16-couple pair mathematically
+could not, whatever the defense did.
+
+Worth noting for planning: the hijacks are not spread evenly. `week0_baseline_24.json`
+(the same run aggregated at 6 user tasks, replayed from cache, 0 requests) scores
+ASR 8.3% - 2 of 24 - so user tasks 6 and 7 carry four of the six. A wider sweep
+is not just more of the same; which tasks are included changes what is
+measurable.
+
+## Still owed: the defended arm at 32 couples
+
+`week0_defended_16.json` covers 16 couples. The 32-couple defended arm is
+**17/32 measured** - its task results are cached under
+`results/raw/agentdojo_logs/aegis-baseline-local-openai_gpt-oss-120b-low-aegis-spotlight_detect_gate-d39df097/`
+- and stopped against the 200,000-token daily cap, not against a bug. Finish it
+on a fresh day's budget with:
+
+```
+python -m evals.agentdojo.runner --defense aegis --defense-layers all \
+    --max-tasks 8 --max-injection-tasks 4 --resume \
+    --out results/week0_defended_wide.json
+```
+
+`--resume` replays the 17 already measured and runs only the remaining 15. Then:
+
+```
+python -m evals.stats.analysis --baseline results/week0_baseline_wide.json \
+    --defended results/week0_defended_wide.json
+```
+
+Until that exists, the only defended result in this directory is the 16-couple
+one, and it is not significant.
+
 ## Runs that are NOT valid baselines
 
 `week0_nvidia_llama31_8b.json` (4 user x 2 injection) and
