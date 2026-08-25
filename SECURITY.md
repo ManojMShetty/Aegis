@@ -11,11 +11,11 @@ To measure a defense you must be able to run the attack. This repository therefo
 contains attack payloads and an attack harness. Their sole purpose is to test the
 defenses in this repository.
 
-## Authorized scope — attacks run only against mock tools in a sealed sandbox
+## Authorized scope — attacks run only against mock tools
 
-**All offensive code in this repository targets simulated tools inside an isolated
-container. Nothing in this repository is intended for, or configured for, use against any
-system not owned by the operator.**
+**All offensive code in this repository targets simulated tools. Nothing in this
+repository is intended for, or configured for, use against any system not owned by the
+operator.**
 
 - **Targets:** AgentDojo's mock suites (workspace / banking / travel / slack) and local
   fixtures only. Never a live third-party service.
@@ -25,20 +25,40 @@ system not owned by the operator.**
 - **No third-party testing:** this project performs no scanning, probing, or testing of
   any external system, and is not a tool for doing so.
 
-## Three independent guarantees that real credentials cannot enter the attack loop
+## What actually keeps real credentials out of the attack loop today
 
-Defense in depth applies to the lab, not just the product. Each guarantee is sufficient
-alone; all three are enforced.
+Only one control below is built. Saying which is which is the point of this section: a
+security document that describes intentions in the present tense is worse than one that
+describes nothing, because a reader budgets trust against it.
 
-1. **Network** — the eval service runs on a Docker network declared `internal: true`. It
-   has no route to the WAN. Even code that tried to reach Gmail or GitHub could not.
-2. **Configuration** — the eval service is given no credential env file, and a
-   fail-closed startup guard refuses to boot if `AEGIS_TOOLS=mock` while any
-   real-credential-shaped variable is present in the environment.
-3. **Code** — real tool implementations are import-guarded behind
-   `AEGIS_ALLOW_REAL_CREDENTIALS=true`, which the eval image never sets.
+**Enforced now.**
 
-`tests/security/test_no_egress.py` asserts guarantee (1) holds at runtime.
+- **No real tools exist.** There are no real tool implementations in this repository to
+  invoke, with or without a credential. The agent under test drives AgentDojo's mock
+  suites, whose side-effecting tools mutate an in-memory environment.
+- **The offline test suite cannot reach a provider.** `tests/conftest.py` strips
+  `GROQ_API_KEY`, `NVIDIA_API_KEY` and `GEMINI_API_KEY` from the environment for every
+  non-costly test, so a test that regressed into making a real call fails instead of
+  spending quota.
+
+**Not built — this is the intended lab design, not a control in force.**
+
+1. **Network isolation.** The plan is an eval service on a Docker network declared
+   `internal: true`, with no route to the WAN. There is no Dockerfile or compose file in
+   this repository, and `tests/security/test_no_egress.py`, cited in earlier versions of
+   this document as asserting that guarantee, does not exist.
+2. **Configuration tripwire.** A fail-closed startup guard refusing to boot if
+   `AEGIS_TOOLS=mock` while a real-credential-shaped variable is present. `AEGIS_TOOLS`
+   appears in no source file today.
+3. **Import guard.** Real tool implementations gated behind
+   `AEGIS_ALLOW_REAL_CREDENTIALS=true`. Also not present, because there are no real tool
+   implementations to gate.
+
+**The honest statement of current isolation:** the agent under test is a hosted model
+reached over the internet, so every recorded run makes outbound requests to that endpoint
+(the 16-couple defended arm made 61). The runs are not network-isolated. What protects
+against real-world side effects is that the *tools* are simulated, not that the process
+is sandboxed.
 
 ## Honest limitations
 

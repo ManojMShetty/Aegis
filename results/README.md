@@ -30,9 +30,11 @@ was measured, not replayed. Reproduce with:
 python -m evals.agentdojo.runner --max-tasks 3 --max-injection-tasks 4
 ```
 
-## `week0_baseline_16.json` - the widest measurement, and the better one to quote
+## `week0_baseline_16.json` - the arm the defended run is paired against
 
-A 4x4 block: the same configuration, 16 injected couples.
+A 4x4 block: the same configuration, 16 injected couples. Superseded as the widest
+baseline by `week0_baseline_wide.json` (32 couples, below), but this is the one the
+defended arm covers couple-for-couple, so it is the one the paired test uses.
 
 ```
 utility               75.0%    3/4    95% CI [30.1%, 95.4%]
@@ -108,8 +110,10 @@ either way. The same holds for the 18.8 pp gain in utility-under-attack
 (5 discordant pairs, p = 0.375).
 
 So the honest statement of this result is: **on 16 paired couples the defended
-arm blocked both observed hijacks at no measured utility cost, and the sample is
-too small to distinguish that from chance.** Getting to a claim worth making
+arm blocked both observed hijacks at no NET utility cost, and the sample is too
+small to distinguish that from chance.** Both arms solve 3 of 4 benign tasks but
+not the same three - the baseline fails `user_task_2`, the defended arm fails
+`user_task_3`. At 4 tasks that is noise in either direction, not a finding. Getting to a claim worth making
 means more couples - roughly 48 per arm at this ASR - not a better-sounding
 sentence about these ones.
 
@@ -142,7 +146,7 @@ measurable.
 ## Still owed: the defended arm at 32 couples
 
 `week0_defended_16.json` covers 16 couples. The 32-couple defended arm is
-**17/32 measured** - its task results are cached under
+**18/32 measured** - its task results are cached under
 `results/raw/agentdojo_logs/aegis-baseline-local-openai_gpt-oss-120b-low-aegis-spotlight_detect_gate-d39df097/`
 - and stopped against the 200,000-token daily cap, not against a bug. Finish it
 on a fresh day's budget with:
@@ -153,7 +157,7 @@ python -m evals.agentdojo.runner --defense aegis --defense-layers all \
     --out results/week0_defended_wide.json
 ```
 
-`--resume` replays the 17 already measured and runs only the remaining 15. Then:
+`--resume` replays the 18 already measured and runs only the remaining 14. Then:
 
 ```
 python -m evals.stats.analysis --baseline results/week0_baseline_wide.json \
