@@ -32,6 +32,8 @@ from collections.abc import Iterator
 
 import pytest
 
+from aegis.config.sandbox import scan_environment
+
 # Every variable any provider in this repo will read a key from. Adding a
 # provider means adding its variable here; the names are variable NAMES and
 # carry no secret.
@@ -55,4 +57,28 @@ def _no_real_api_keys(
     if request.node.get_closest_marker("costly") is None:
         for name in API_KEY_ENV_VARS:
             monkeypatch.delenv(name, raising=False)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tool_credentials(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
+    """Remove every REAL TOOL credential the startup tripwire would flag.
+
+    WHY, given the tripwire already refuses to run beside one: because the suite
+    exercises code paths that CALL the tripwire, and whether they pass would
+    otherwise depend on which secrets the developer happened to export in this
+    shell. A test that fails on one laptop and passes on another teaches people
+    to ignore it.
+
+    Only names the guard already flags are removed, and only their absence is
+    asserted anywhere - no value is read, copied or logged here. The tripwire's
+    own tests pass explicit mappings rather than the real environment, so they
+    are unaffected by this, and a test that wants a fake credential present sets
+    one afterwards with the same ``monkeypatch``.
+    """
+    if request.node.get_closest_marker("costly") is None:
+        for finding in scan_environment():
+            monkeypatch.delenv(finding.name, raising=False)
     yield

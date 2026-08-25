@@ -148,6 +148,7 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -163,6 +164,7 @@ from agentdojo.benchmark import (
 from agentdojo.logging import OutputLogger
 from agentdojo.task_suite.load_suites import get_suite
 
+from aegis.config.sandbox import SandboxViolation, enforce_sandbox
 from aegis.security.capabilities import Verdict as GateVerdict
 from evals.agentdojo.defense import (
     AegisPipeline,
@@ -1260,6 +1262,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.min_request_interval is not None
         else DEFAULT_MIN_REQUEST_INTERVAL_S
     )
+
+    # The startup tripwire, at the last moment before anything is built and the
+    # first moment the run's own key variable is known: --api-key-env names the
+    # MODEL-side variable for this run, which is legitimate under mock tools.
+    # Anything else credential-shaped is a real TOOL credential, which the mock
+    # suites never need, and this process refuses to run beside one.
+    declared_key_env: frozenset[str] = (
+        frozenset({args.api_key_env}) if args.api_key_env else frozenset()
+    )
+    try:
+        enforce_sandbox(extra_model_provider_vars=declared_key_env)
+    except SandboxViolation as exc:
+        print(f"refusing to start: {exc}", file=sys.stderr)
+        return 2
 
     result = run_baseline(
         provider=args.provider,

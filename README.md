@@ -269,25 +269,46 @@ The statistics are dependency-free stdlib, in
 Every attack runs against **AgentDojo's mock suites**. Their side-effecting tools —
 `send_email`, `delete_file`, `share_file` — mutate an in-memory environment and never
 reach a real service, so "attack success" means the benchmark's own checker saw an
-unauthorized side effect in that environment. No real email is ever sent and no real
-credential is ever present.
+unauthorized side effect in that environment. No real email is ever sent.
 
-What is **not** true, and was claimed here until it was audited: the runs are not network
-isolated. The agent under test is a remote API call, so a recorded run opens outbound
-connections to the model endpoint — the 16-couple defended arm made 61 of them. The
-sandbox design in [`SECURITY.md`](SECURITY.md) (a Docker network with `internal: true`, a
-fail-closed credential tripwire, import-guarded real tools) is the **intended** lab setup
-for when real tool implementations exist. None of it is built yet: there is no Dockerfile
-in this repository, and the `tests/security/test_no_egress.py` that `SECURITY.md` cites
-does not exist. It is described there as a design, not as an enforced control.
+Three controls keep it that way, and each is pinned by a test in
+[`tests/security/test_no_egress.py`](tests/security/test_no_egress.py):
 
-The test suite is held to a rule that *is* enforced: [`tests/conftest.py`](tests/conftest.py)
-strips every provider API key from the environment for each non-costly test, so a
-regression that reaches for the network costs an error message instead of a day's quota.
+1. **The offline test suite cannot reach a provider.**
+   [`tests/conftest.py`](tests/conftest.py) strips every provider API key from the
+   environment for each non-costly test, so a regression that reaches for the network
+   costs an error message instead of a day's quota.
+   (`test_offline_suite_has_no_provider_key_in_the_environment`,
+   `test_provider_client_refuses_to_build_without_a_key`)
+2. **A fail-closed configuration tripwire.**
+   [`src/aegis/config/sandbox.py`](src/aegis/config/sandbox.py) refuses to start a run
+   when `AEGIS_TOOLS=mock` (the default) and the environment holds a variable shaped like
+   a **real tool** credential — by name shape, or by an issuer prefix in the value
+   (`ghp_`, `AKIA`, `xoxb-`, ...). The model provider's key is deliberately allowed,
+   because the agent under test is a remote model by design; a GitHub or Slack token
+   pasted into it is not. Errors name the variable and **never** the value.
+   (`test_tripwire_fires_on_tool_credential_by_name_shape`,
+   `test_model_provider_key_is_allowed_under_mock_tools`,
+   `test_error_names_the_variable_and_never_echoes_the_value`)
+3. **An import guard.** [`src/aegis/tools/guard.py`](src/aegis/tools/guard.py) refuses to
+   let a real tool module *import* without `AEGIS_ALLOW_REAL_CREDENTIALS=true`, so the
+   dangerous callable never enters the process. There are no real tools yet — the guard is
+   written ahead of the thing it guards, so the first one has to satisfy it.
+   (`test_real_tool_module_refuses_to_import_by_default`)
 
-The test suite is held to the same rule: [`tests/conftest.py`](tests/conftest.py) strips
-every provider API key from the environment for each non-costly test, so a regression that
-reaches for the network costs an error message instead of a day's quota.
+That one variable, `AEGIS_ALLOW_REAL_CREDENTIALS=true`, is the only way to disable either
+guard, and `AEGIS_TOOLS=real` requires it.
+
+**What is still not true, and was claimed here until it was audited: the runs are not
+network isolated.** [`docker/`](docker/) now holds a real Dockerfile and a compose file
+whose eval service sits on a network declared `internal: true` with no credential env file
+(asserted by `test_eval_service_network_is_internal`, and validated against the Docker CLI
+in a test that *skips* when Docker is absent). But an internal network cannot reach a
+hosted model endpoint either — so **no recorded run in `results/` used it**, and none could
+have: the agent under test is a Groq-hosted model, and the 16-couple defended arm made 61
+outbound requests. That compose service is for a future local-model or fully-mocked
+configuration. See [`SECURITY.md`](SECURITY.md), which separates what is enforced from what
+is scaffolding.
 
 ## Status
 
@@ -301,6 +322,10 @@ and no database.
 - [x] **L3** Detector — heuristic cascade tier: override / role / exfiltration / credential / hidden / tool-invocation signals, advisory by design
 - [x] **L5** Capability gate — tier floor, authorization, flag veto, high-risk allowlists
 - [x] Security policy as auditable YAML (`config/trust_tiers.yaml`) + fail-closed loader
+- [x] Lab safety controls — fail-closed credential tripwire (`AEGIS_TOOLS`) + import guard
+      (`AEGIS_ALLOW_REAL_CREDENTIALS`), pinned by `tests/security/test_no_egress.py`
+- [ ] Network-isolated benchmark run — `docker/` declares an `internal: true` network, but
+      reaching a *hosted* model through it is impossible; needs a local model first
 - [x] Runnable worked example + interactive playground (detector auto-scans; attack blocked 4 ways; benign case allowed)
 - [x] AgentDojo verified installable on this toolchain (Python 3.13 / Windows, v0.1.35)
 - [x] **L4** Quarantine extractor - dual-LLM boundary; Pydantic-validated typed output, fail-closed, proven live against Gemini
@@ -327,7 +352,9 @@ uv run ruff check . && uv run mypy
 
 The security domain is deliberately dependency-light: the trust lattice, detector, and
 capability gate are pure logic, so they are fully verifiable in isolation with no Docker,
-no Postgres, and no API key — and cost nothing to run.
+no Postgres, and no API key — and cost nothing to run. The compose file's structure is
+checked by parsing YAML, so that runs everywhere too; the single test that shells out to
+the Docker CLI skips cleanly when Docker is not installed.
 
 ## License
 

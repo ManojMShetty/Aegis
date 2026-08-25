@@ -1,0 +1,54 @@
+# The lab network. `internal: true` is the whole file.
+#
+# WHAT THIS ENFORCES
+# ------------------
+# Docker attaches no gateway to an internal network, so a container on `lab` has
+# no route off the host: an exfiltration attempt that survives every layer of the
+# defense still cannot reach an attacker's collector. That is a property of the
+# network, not of the code inside it, which is why it is worth having separately
+# from the tripwire and the import guard.
+#
+# WHAT IT COSTS, STATED HONESTLY
+# ------------------------------
+# The same absence of a route applies to the model endpoint. The recorded runs in
+# results/ drove a hosted model (gpt-oss-120b via Groq) and therefore did NOT run
+# under this compose file - they could not have. This service is for a local-model
+# or fully-mocked configuration. See SECURITY.md; do not read a number in this
+# repository as having been produced inside this network.
+#
+# There is deliberately no `env_file:` here. `.env` holds the model provider key,
+# and mounting it into an attack container is exactly the mistake the startup
+# tripwire exists to catch.
+
+name: aegis-rag-lab
+
+services:
+  eval:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: aegis-rag/eval:local
+    # Overridden on the command line for a real run, e.g.
+    #   docker compose run --rm eval --suite workspace --max-tasks 3
+    command: ["--help"]
+    networks:
+      - lab
+    environment:
+      # Mock tools, and the escape hatch explicitly off rather than merely absent
+      # - a reader of this file should not have to know the default.
+      AEGIS_TOOLS: "mock"
+      AEGIS_ALLOW_REAL_CREDENTIALS: "false"
+    volumes:
+      # The one writable path: benchmark artifacts come back out.
+      - ../results:/app/results
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+
+networks:
+  lab:
+    internal: true

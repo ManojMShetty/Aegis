@@ -27,11 +27,12 @@ operator.**
 
 ## What actually keeps real credentials out of the attack loop today
 
-Only one control below is built. Saying which is which is the point of this section: a
-security document that describes intentions in the present tense is worse than one that
-describes nothing, because a reader budgets trust against it.
+Three controls are built and enforced by tests; one part of the intended design is
+built-but-not-in-force, and one is still unbuilt. Saying which is which is the point of
+this section: a security document that describes intentions in the present tense is worse
+than one that describes nothing, because a reader budgets trust against it.
 
-**Enforced now.**
+**Enforced now.** Each sentence names the test that fails if it stops being true.
 
 - **No real tools exist.** There are no real tool implementations in this repository to
   invoke, with or without a credential. The agent under test drives AgentDojo's mock
@@ -40,25 +41,85 @@ describes nothing, because a reader budgets trust against it.
   `GROQ_API_KEY`, `NVIDIA_API_KEY` and `GEMINI_API_KEY` from the environment for every
   non-costly test, so a test that regressed into making a real call fails instead of
   spending quota.
+  *Proved by* `test_offline_suite_has_no_provider_key_in_the_environment` and
+  `test_provider_client_refuses_to_build_without_a_key`.
+- **Configuration tripwire.** `src/aegis/config/sandbox.py` is a fail-closed startup
+  guard: under `AEGIS_TOOLS=mock` (the default), it refuses to start if the environment
+  holds a variable shaped like a **real tool** credential — detected by name shape
+  (`...TOKEN`, `...SECRET`, `...API_KEY`, ...) or by a well-known issuer prefix in the
+  value (`ghp_`, `AKIA`, `xoxb-`, `glpat-`, `ya29.`, ...). The eval runner calls it in
+  `main()` before it builds anything, and exits 2.
+  *Proved by* `test_tripwire_fires_on_tool_credential_by_name_shape`,
+  `test_tripwire_fires_on_tool_credential_by_value_prefix`,
+  `test_tripwire_fires_even_inside_a_model_provider_variable`,
+  `test_tripwire_is_the_default_with_no_tool_mode_set` and — that the runner really does
+  call it, rather than merely owning a guard —
+  `test_eval_runner_refuses_to_start_beside_a_tool_credential`.
+- **The tripwire never echoes a value.** Findings carry the variable NAME and a reason;
+  the value is never a field, never logged, and cannot appear in the refusal message. A
+  guard that printed what it found would be a wider leak than the one it prevents.
+  *Proved by* `test_error_names_the_variable_and_never_echoes_the_value`.
+- **The model provider's key is deliberately allowed.** The agent under test *is* a
+  remote model, so `GROQ_API_KEY` and its siblings are model-side by design and pass the
+  guard; a run may declare its own key variable with `--api-key-env`. Everything else
+  credential-shaped is treated as a tool credential the mock suites never need. A GitHub
+  or Slack token pasted *into* a model-provider variable still fires.
+  *Proved by* `test_model_provider_key_is_allowed_under_mock_tools`,
+  `test_every_model_provider_variable_is_allowed`,
+  `test_runs_own_key_variable_can_be_declared` and
+  `test_declaring_a_model_variable_cannot_smuggle_a_tool_credential`.
+- **Import guard.** `src/aegis/tools/guard.py` refuses to let a real tool module *import*
+  unless `AEGIS_ALLOW_REAL_CREDENTIALS=true`, so the dangerous callable never enters the
+  process and no registry or tool loop can reach it. There are no real tools yet: the
+  guard is written ahead of the thing it guards on purpose, so the first one has to
+  satisfy it. `src/aegis/tools/real_example.py` is an inert demonstration.
+  *Proved by* `test_real_tool_module_refuses_to_import_by_default`,
+  `test_refused_import_is_an_import_error` and
+  `test_real_tool_module_imports_with_the_deliberate_opt_in`.
+- **One auditable escape hatch.** `AEGIS_ALLOW_REAL_CREDENTIALS=true` — and nothing else —
+  disables either guard, and `AEGIS_TOOLS=real` requires it. It is a separate, explicitly
+  named variable so that enabling it is visible in a shell history.
+  *Proved by* `test_escape_hatch_lets_a_deliberate_operator_through`,
+  `test_escape_hatch_is_not_set_by_accident`,
+  `test_real_tools_require_the_escape_hatch_even_with_a_clean_environment` and
+  `test_unknown_tool_mode_fails_closed`.
 
-**Not built — this is the intended lab design, not a control in force.**
+All of the above live in `tests/security/test_no_egress.py` — the file earlier versions of
+this document cited and did not have.
 
-1. **Network isolation.** The plan is an eval service on a Docker network declared
-   `internal: true`, with no route to the WAN. There is no Dockerfile or compose file in
-   this repository, and `tests/security/test_no_egress.py`, cited in earlier versions of
-   this document as asserting that guarantee, does not exist.
-2. **Configuration tripwire.** A fail-closed startup guard refusing to boot if
-   `AEGIS_TOOLS=mock` while a real-credential-shaped variable is present. `AEGIS_TOOLS`
-   appears in no source file today.
-3. **Import guard.** Real tool implementations gated behind
-   `AEGIS_ALLOW_REAL_CREDENTIALS=true`. Also not present, because there are no real tool
-   implementations to gate.
+**Built, but NOT in force for any recorded run.**
+
+- **The eval container and its internal network.** `docker/Dockerfile` and
+  `docker/docker-compose.yml` exist, are real, and put the eval service on a network
+  declared `internal: true`, with no `env_file` and no credential copied into the image.
+  Docker attaches no gateway to an internal network, so a container on it has no route
+  off the host.
+  *Proved by* `test_eval_service_network_is_internal`,
+  `test_every_service_is_attached_only_to_internal_networks`,
+  `test_compose_mounts_no_credential_file`, `test_dockerfile_copies_no_credential_file`
+  and — skipped cleanly when the Docker CLI is absent —
+  `test_compose_file_validates_against_the_docker_cli`.
+
+  **The honest caveat, which is why this is not listed as enforced:** an internal network
+  cannot reach the hosted model endpoint either. Every recorded run in `results/` drove
+  `gpt-oss-120b` via Groq and therefore did **not** run inside this compose file — it
+  could not have. That compose service is for a future local-model or fully-mocked
+  configuration. **No number published from this repository was produced inside that
+  network.**
+
+**Still not built — intended lab design, not a control in force.**
+
+1. **Network isolation of an actual benchmark run.** That needs a local model (or fully
+   recorded/mocked model responses) so the agent under test is reachable without a route
+   to the WAN. Until then the compose file above is scaffolding, not a guarantee about any
+   published result.
 
 **The honest statement of current isolation:** the agent under test is a hosted model
 reached over the internet, so every recorded run makes outbound requests to that endpoint
 (the 16-couple defended arm made 61). The runs are not network-isolated. What protects
-against real-world side effects is that the *tools* are simulated, not that the process
-is sandboxed.
+against real-world side effects is that the *tools* are simulated — now backed by two
+enforced guards that keep a real tool credential, and a real tool module, out of the
+process in the first place.
 
 ## Honest limitations
 
@@ -88,5 +149,11 @@ find a flaw in the defenses — especially a bypass of the trust lattice or capa
 
 ## Credentials
 
-No real credentials are required to run the evaluation suite. `.env.example` contains
-placeholders only; `.env` is gitignored and is never mounted into the eval container.
+One credential is required, and only one: a **model provider** key (`GROQ_API_KEY` by
+default), because the agent under test is a hosted model. **No tool credential is ever
+required** — the suites are mock — and the startup tripwire in
+`src/aegis/config/sandbox.py` refuses to run beside one.
+
+`.env.example` contains placeholders only; `.env` is gitignored, is stripped from the
+environment for every non-costly test by `tests/conftest.py`, and is not copied into the
+image or mounted by `docker/docker-compose.yml` (which declares no `env_file`).
