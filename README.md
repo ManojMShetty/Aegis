@@ -356,6 +356,23 @@ no Postgres, and no API key — and cost nothing to run. The compose file's stru
 checked by parsing YAML, so that runs everywhere too; the single test that shells out to
 the Docker CLI skips cleanly when Docker is not installed.
 
+### Continuous integration — one manual step
+
+`.github/workflows/ci.yml` exists in the working tree and runs the same four gates
+(`ruff format --check`, `ruff check`, `mypy`, `pytest -m "not costly"`), plus an assertion
+that no provider key is present so a `costly` test cannot fire in CI by accident. It is
+**not on the remote**: pushing anything under `.github/workflows/` requires a token with
+the `workflow` scope, which the client that authored the rest of this history does not
+hold. Push it from an environment that has one:
+
+```bash
+git add .github/workflows/ci.yml && git commit -m "Add CI workflow" && git push
+```
+
+`tests/security/test_ci_workflow.py` describes that file rather than the package, so it
+skips when the file is absent. A clone that never received it gets a green suite and a
+skip reason, not a red one — the workflow is genuinely missing, but nothing else is.
+
 ## License
 
 MIT
