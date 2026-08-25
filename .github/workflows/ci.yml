@@ -1,0 +1,135 @@
+# Continuous integration: the four gates this repository claims to keep green.
+#
+# WHY THE INSTALL IS HAND-ROLLED AND NOT `uv sync`
+# ------------------------------------------------
+# `uv sync` is deliberately never run here, for two independent reasons:
+#
+#   1. `uv sync` PRUNES: it removes anything not in the lock's resolution. The
+#      working environment for this project was assembled with `uv pip install`,
+#      and a sync would quietly delete the very packages the eval tests import
+#      (verified: a dry run removes mypy, pytest, pytest-asyncio, pytest-cov,
+#      ruff and types-pyyaml).
+#   2. The `evals` extra pulls ranx, scipy, statsmodels and numpy, and nothing
+#      under tests/ imports any of them, so CI would be paying to install weight
+#      it never uses. (An earlier version of this comment said ranx fails to
+#      build on 3.13. It does not - it ships a py3-none-any wheel and the extra
+#      resolves cleanly. The reason is weight, not a build failure.)
+#
+# The same trap is one step further in: a bare `uv run` implies a sync. Hence
+# UV_NO_SYNC below and the explicit `--no-sync` on every invocation. If you add a
+# `uv run` here without it, CI will still be green - right up until it silently
+# uninstalls agentdojo.
+#
+# WHAT IS INSTALLED, AND WHY THAT IS ENOUGH
+# -----------------------------------------
+# Core (`.[llm]`)      - pydantic, pyyaml, structlog, httpx, anthropic.
+# dev tools            - the gates themselves: ruff, mypy, pytest and plugins.
+# agentdojo            - tests/evals/ imports it at module scope, and mypy checks
+#                        the `evals` package, which imports it too. Without it a
+#                        large slice of the suite does not collect. It is a pure
+#                        Python dependency; it drags in langgraph/langchain/
+#                        cohere/openai/tenacity but no GPU wheel and no model.
+# google-genai, openai - imported directly by evals/agentdojo/{gemini,openai}_llm.py
+#                        and by their tests. Pinned explicitly rather than relied
+#                        on as agentdojo transitives.
+#
+# Not installed, on purpose: torch, sentence-transformers (the `retrieval` extra)
+# and ranx/scipy/statsmodels/numpy (the `evals` extra). Nothing under tests/
+# imports them, so the full `-m "not costly"` suite runs complete without them.
+# If a future test needs one, it needs a `pytest.importorskip`, not a GPU runner.
+#
+# NO KEY, EVER
+# ------------
+# There is no `secrets:` block in this file and there never should be. A step
+# below asserts, from the repository's own list of provider variables, that not
+# one of them is set - so a test marked `costly` cannot spend quota in CI even if
+# somebody removes the `-m "not costly"` filter by accident.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # A bare `uv run` syncs, and a sync prunes. See the header.
+  UV_NO_SYNC: "1"
+  # The startup tripwire's default, made explicit: mock tools only.
+  AEGIS_TOOLS: mock
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          # Dependencies are declared in pyproject.toml and pinned in the install
+          # step of this workflow, so both invalidate the cache.
+          cache-dependency-glob: |
+            pyproject.toml
+            .github/workflows/ci.yml
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Create the environment
+        run: uv venv --python 3.13
+
+      - name: Install the project and the gate dependencies
+        # One invocation, not three: uv then resolves the whole set together and
+        # cannot leave a later install quietly downgrading an earlier one.
+        run: |
+          uv pip install -e ".[llm]" \
+            "pytest>=8.0" "pytest-asyncio>=0.23" "pytest-cov>=5.0" \
+            "ruff>=0.6" "mypy>=1.11" "types-PyYAML" \
+            "agentdojo>=0.1.35" "google-genai>=1.0" "openai>=1.40" "tenacity>=8.2"
+
+      - name: Assert no API key is present
+        # Reads the variable NAMES from src/aegis/config/sandbox.py so this check
+        # cannot drift from the code. Names only - a value is never read here, for
+        # the same reason the tripwire never echoes one: a CI log is forever.
+        run: |
+          uv run --no-sync python - <<'PY'
+          import os
+          import sys
+
+          from aegis.config.sandbox import MODEL_PROVIDER_ENV_VARS
+
+          # Model-provider keys buy the agent under test; HF_TOKEN writes to a real
+          # account; AEGIS_RUN_COSTLY is the opt-in the costly tests gate on. None
+          # of the three has any business in CI.
+          watched = sorted(MODEL_PROVIDER_ENV_VARS | {"HF_TOKEN", "AEGIS_RUN_COSTLY"})
+          present = [name for name in watched if os.environ.get(name)]
+          if present:
+              print(f"CI must run with no credentials. These are set: {', '.join(present)}")
+              sys.exit(1)
+          print(f"checked {len(watched)} variables; none set")
+          PY
+
+      - name: ruff format --check
+        run: uv run --no-sync ruff format --check .
+
+      - name: ruff check
+        run: uv run --no-sync ruff check .
+
+      - name: mypy --strict
+        run: uv run --no-sync mypy
+
+      - name: pytest
+        # `not costly` excludes the tests that make real paid API calls. The Docker
+        # test in tests/security/test_no_egress.py needs only the compose CLI, not a
+        # running daemon, and skips cleanly if the CLI is missing.
+        run: uv run --no-sync pytest -m "not costly"
