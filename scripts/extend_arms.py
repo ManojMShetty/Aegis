@@ -34,6 +34,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from aegis.config.sandbox import scan_environment
+
 # How long to wait after the endpoint reports the daily budget is gone. The cap
 # refills on a daily boundary, so a short retry only burns wall-clock; 20 minutes
 # is frequent enough to pick the budget up promptly without hammering.
@@ -85,6 +87,31 @@ def _couples_recorded(out: Path) -> int:
     return len(security) if isinstance(security, dict) else 0
 
 
+def _sandboxed_env() -> dict[str, str]:
+    """This process's environment minus every credential the eval must not inherit.
+
+    The runner refuses to start beside a variable shaped like a real tool
+    credential (aegis.config.sandbox), and it is right to: a benchmark run drives
+    an agent through attack payloads, so any unrelated secret sitting in its
+    environment is one tool call away from an exfiltration target. In practice the
+    ambient shell carries such variables for reasons that have nothing to do with
+    this project - the harness that launched it, an unrelated CLI, a developer's
+    own tokens.
+
+    The wrong response is AEGIS_ALLOW_REAL_CREDENTIALS=true, which switches the
+    guard off wholesale and would let a genuine mistake through for the rest of the
+    run. The right one is to hand the subprocess an environment that has nothing to
+    find, which is strictly safer than the guard passing.
+
+    The decision of what counts is delegated to `scan_environment`, so this cannot
+    drift from what the runner enforces: whatever the guard would refuse, we remove.
+    """
+    env = dict(os.environ)
+    for finding in scan_environment(env):
+        env.pop(finding.name, None)
+    return env
+
+
 def _run(arm: Arm, user_tasks: int, injection_tasks: int) -> tuple[bool, str]:
     """Drive one arm once. Returns (budget_exhausted, tail_of_output)."""
     # Fixed argv, no shell: nothing here is built from anything the model produced.
@@ -93,6 +120,7 @@ def _run(arm: Arm, user_tasks: int, injection_tasks: int) -> tuple[bool, str]:
         capture_output=True,
         text=True,
         check=False,
+        env=_sandboxed_env(),
     )
     combined = f"{proc.stdout}\n{proc.stderr}"
     exhausted = any(marker in combined for marker in _RATE_LIMIT_MARKERS)
