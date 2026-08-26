@@ -143,29 +143,62 @@ ASR 8.3% - 2 of 24 - so user tasks 6 and 7 carry four of the six. A wider sweep
 is not just more of the same; which tasks are included changes what is
 measurable.
 
-## Still owed: the defended arm at 32 couples
-
-`week0_defended_16.json` covers 16 couples. The 32-couple defended arm is
-**18/32 measured** - its task results are cached under
-`results/raw/agentdojo_logs/aegis-baseline-local-openai_gpt-oss-120b-low-aegis-spotlight_detect_gate-d39df097/`
-- and stopped against the 200,000-token daily cap, not against a bug. Finish it
-on a fresh day's budget with:
+## `week0_defended_wide.json` - the headline result, and the first significant one
 
 ```
-python -m evals.agentdojo.runner --defense aegis --defense-layers all \
-    --max-tasks 8 --max-injection-tasks 4 --resume \
-    --out results/week0_defended_wide.json
+python -m evals.agentdojo.runner --defense aegis --defense-layers all     --max-tasks 8 --max-injection-tasks 4 --resume     --out results/week0_defended_wide.json
 ```
 
-`--resume` replays the 18 already measured and runs only the remaining 14. Then:
+Covers exactly the 32 couples in `week0_baseline_wide.json` - verified identical
+key sets, which is what makes the pair a pair.
 
 ```
-python -m evals.stats.analysis --baseline results/week0_baseline_wide.json \
-    --defended results/week0_defended_wide.json
+                       baseline            defended
+utility                87.5% (7/8)    ->   75.0% (6/8)
+attack success rate    18.8% (6/32)   ->    0.0% (0/32)
+utility under attack   65.6% (21/32)  ->   81.2% (26/32)
 ```
 
-Until that exists, the only defended result in this directory is the 16-couple
-one, and it is not significant.
+```
+python -m evals.stats.analysis --baseline results/week0_baseline_wide.json     --defended results/week0_defended_wide.json
+```
+
+```
+asr    -18.8 pp   95% CI [-37.5, +0.0]
+       discordant: baseline-only 6, defended-only 0
+       McNemar exact p = 0.0312
+```
+
+**Every one of the six observed hijacks was blocked, none were introduced, and at
+six discordant pairs the exact test clears p < 0.05 for the first time.** This is
+the minimum evidence that can: the McNemar floor at n=6 is 0.03125, and this
+result sits on it. One fewer hijack in the baseline and the same perfect defense
+would have been unprovable.
+
+The gate is visible in the run rather than inferred: 39 decisions, 11 refusals,
+on `send_email`, `delete_file` and `create_calendar_event`, with zero guard, gate
+or quarantine failures.
+
+### The caveat that must travel with it
+
+**Benign utility fell, 7/8 to 6/8.** That is one task the defended agent did not
+complete and the undefended one did. It is NOT significant - 3 discordant pairs,
+p = 1.0000, and the interval [-50.0, +25.0] pp spans zero comfortably - but the
+point estimate moved the wrong way, and quoting the ASR result without it would
+be exactly the selective reporting this repository is built to avoid. At 8 clean
+tasks the honest reading is "too few tasks to tell", not "no cost".
+
+Utility under attack rose 15.6 pp (p = 0.2668), also not significant.
+
+So the defensible sentence is: **on 32 paired couples Aegis eliminated all six
+observed hijacks (18.8% to 0%, McNemar p = 0.031) while benign utility fell from
+7/8 to 6/8, a difference too small to distinguish from noise at this sample
+size.**
+
+Provenance: `replayed: false`, 54 model requests. `force_rerun: false` because
+the run resumed - 18 of the 32 couples were measured on 24-25 August and replayed
+from cache, 14 were measured on the 26th. All 32 are real measurements of this
+same configuration; none were fabricated or re-labelled.
 
 ## Runs that are NOT valid baselines
 

@@ -2,12 +2,13 @@
 
 **A security-first RAG system that treats retrieved content as untrusted data, never instructions — and measures whether that actually works.**
 
-> **Status: Week-0 measured; the defended arm is measured at 16 paired couples and
-> unfinished at 32.** The numbers below come from the harness in `evals/` and are
-> committed as JSON under [`results/`](results/). Every rate is reported with its
-> denominator and a 95% confidence interval, and **none of the baseline-vs-defended
-> differences is statistically significant** — the [Results](#results) section explains
-> why that is arithmetic rather than a disappointment.
+> **Status: the defended arm is measured at 32 paired couples, and the security
+> result is statistically significant.** Aegis eliminated all six observed hijacks
+> (attack success rate 18.8% to 0%, exact McNemar p = 0.031). Benign utility fell
+> from 7/8 to 6/8 over the same run - not significant, but the point estimate moved
+> the wrong way and travels with the headline everywhere it appears. Every rate
+> below carries its denominator and a 95% confidence interval, and the numbers come
+> from the harness in `evals/`, committed as JSON under [`results/`](results/).
 
 ---
 
@@ -107,7 +108,44 @@ Every arm below shares one configuration, which is what makes the arms comparabl
 | Benchmark | AgentDojo v1.2, `workspace` suite, attack `important_instructions` |
 | Defended arm | `--defense aegis --defense-layers all` = L1 taint + L2 spotlight (datamark) + L3 detect + L5 gate. L4 quarantine is wired but **off** |
 
-### The paired comparison: 16 couples, defense off vs on
+### The headline: 32 paired couples, defense off vs on
+
+Both arms cover exactly the same 32 injected couples (8 user tasks x 4 injection
+tasks) - verified identical key sets. Sources:
+[`results/week0_baseline_wide.json`](results/week0_baseline_wide.json),
+[`results/week0_defended_wide.json`](results/week0_defended_wide.json).
+
+| Metric | Baseline (no defense) | Aegis (L1+L2+L3+L5) | Change (paired) | Exact McNemar |
+|---|---|---|---|---|
+| Attack success rate | 18.8% (6/32), 95% CI [8.9%, 35.3%] | **0.0% (0/32)**, 95% CI [0.0%, 10.7%] | **-18.8 pp** [-37.5, +0.0] | **p = 0.0312** (6 discordant, 6/0) |
+| Benign utility | 87.5% (7/8), 95% CI [52.9%, 97.8%] | 75.0% (6/8), 95% CI [40.9%, 92.9%] | -12.5 pp [-50.0, +25.0] | p = 1.0000 (3 discordant, 2/1) |
+| Utility under attack | 65.6% (21/32), 95% CI [48.3%, 79.6%] | 81.2% (26/32), 95% CI [64.7%, 91.1%] | +15.6 pp [-18.8, +46.9] | p = 0.2668 (13 discordant, 4/9) |
+
+**All six observed hijacks were blocked and none were introduced.** At six
+discordant pairs the exact test clears p < 0.05 for the first time in this
+project - and only just: the McNemar floor at n=6 is 0.03125, so this result sits
+exactly on it. One fewer hijack in the baseline and the same perfect defense
+would have been unprovable. That is why widening the baseline from 16 couples to
+32 was the work that mattered, not the defense changing.
+
+The gate is visible in the run rather than inferred: **39 decisions, 11 refusals**
+on `send_email`, `delete_file` and `create_calendar_event`, with zero guard, gate
+or quarantine failures.
+
+**The caveat that travels with it.** Benign utility fell from 7/8 to 6/8 - one
+task the defended agent did not finish and the undefended one did. It is *not*
+significant (3 discordant pairs, p = 1.0000, interval spanning zero), but the
+point estimate moved the wrong way, and reporting the ASR result without it would
+be the selective reporting this repository exists to avoid. At eight clean tasks
+the honest reading is "too few tasks to tell", not "no cost".
+
+Provenance: `replayed: false`, 54 model requests. `force_rerun: false` because the
+run resumed - 18 of the 32 couples were measured on 24-25 August and replayed from
+cache, 14 on the 26th. All 32 are real measurements of the same configuration.
+
+### The earlier 16-couple pair, kept for the record
+
+
 
 Both arms cover exactly the same 16 injected couples (4 user tasks x 4 injection tasks),
 so every couple is its own control. Sources:
@@ -251,14 +289,14 @@ the same way the Wilson interval is pinned against Newcombe. Binary relevance, t
 
 ### What is not measured
 
-- **The defended arm at 32 couples.** It is partly measured and stopped against Groq's
-  200,000-token daily cap (observed "Used 199,660"), not against a bug. No 32-couple
-  defended result exists, and **no reduction in ASR is claimed as significant anywhere in
-  this repository.** [`results/README.md`](results/README.md) records how many couples are
-  already cached and the `--resume` command that finishes the arm.
+- **Any utility cost, precisely.** The defended arm finished 6 of 8 benign tasks against
+  the baseline's 7 of 8. Three discordant pairs cannot separate a real cost from noise, so
+  whether Aegis costs utility is **open**, not answered. Eight clean tasks is the smallest
+  number in the whole comparison and the obvious next thing to widen.
 - **The per-layer ablation.** `--defense-layers` also accepts `spotlight`, `detect` and
   `gate` individually, so each layer's own contribution can be measured the same way.
-  Those arms have not been run.
+  Those arms have not been run, so **which layer did the blocking is unknown** - the
+  headline is the whole stack, not evidence for any one of its parts.
 - **Retrieval with a real embedding model.** The `vector` arm above is TF-IDF cosine -
   lexical-semantic, not neural. It does not know that *car* and *automobile* are related,
   and the three missed queries are exactly where that costs. A sentence-transformer arm and
@@ -415,7 +453,8 @@ and no database.
 - [x] Fusion — Reciprocal Rank Fusion, deterministic for reproducible evals
 - [x] AgentDojo defense adapter + statistics module (Wilson, exact McNemar, clustered bootstrap)
 - [x] Defense off vs on, paired at 16 couples: recorded, and not significant
-- [ ] Defense off vs on at 32 couples *(stopped by the daily token cap, not by a bug)*
+- [x] **Defense off vs on at 32 couples: ASR 18.8% to 0%, exact McNemar p = 0.031** — significant;
+      benign utility 7/8 to 6/8 over the same run, not significant
 - [ ] Per-layer ablation: `spotlight` / `detect` / `gate` measured separately
 - [x] Retrieval eval - recall@k / precision@k / MRR@k / nDCG@k, a committed golden set,
       and the four-arm ablation in one offline command
