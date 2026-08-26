@@ -310,26 +310,60 @@ def test_import_guard_reads_the_same_switch_as_the_tripwire() -> None:
         require_real_tools_enabled("aegis.tools.pretend", env={})
 
 
-def test_eval_runner_refuses_to_start_beside_a_tool_credential(
+def test_eval_runner_removes_a_tool_credential_before_it_starts(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A guard nobody calls is theatre - so assert the runner actually calls it.
+    """The runner SCRUBS rather than refuses, and that is the stronger guarantee.
 
-    ``main()`` runs the tripwire after argument validation and before it builds a
-    pipeline, so the refusal costs nothing: no suite is loaded, no client is
-    constructed, no request is made, and no result artifact is written.
+    An earlier version refused to start beside a tool credential. That reads well
+    and fails badly: an ordinary shell carries credential-shaped variables that
+    have nothing to do with this project, refusing does not remove them, and the
+    step an operator actually takes next is AEGIS_ALLOW_REAL_CREDENTIALS=true -
+    which switches the guard off for everything, permanently, because of one
+    stray token. The guard people meet daily has to leave them somewhere safe, not
+    somewhere stuck.
+
+    Deleting the variable from the process is strictly stronger than declining to
+    run beside it: afterwards the value is not in the process at all, so no tool
+    loop, traceback or subprocess can reach it. This asserts the removal itself,
+    not merely that the command survived.
     """
     runner = pytest.importorskip("evals.agentdojo.runner", reason="the evals extra is optional")
     monkeypatch.setenv("GITHUB_TOKEN", FAKE_GITHUB)
+
+    # --max-tasks 0 is refused by the parser, so main() returns before it builds a
+    # pipeline or makes a request. The scrub runs first, which is the whole point.
+    with pytest.raises(SystemExit):
+        runner.main(["--max-tasks", "0", "--logdir", str(tmp_path / "logs")])
+
+    assert os.environ.get("GITHUB_TOKEN") is None, (
+        "the credential must be gone from the process, not merely complained about"
+    )
+    captured = capsys.readouterr()
+    stream = captured.err + captured.out
+    assert "GITHUB_TOKEN" in stream, "the operator has to be told which variable went"
+    assert FAKE_GITHUB not in stream, "and never the value - a terminal log is forever"
+
+
+def test_real_tool_mode_is_still_refused_because_scrubbing_cannot_fix_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Scrubbing replaced one refusal, not the principle.
+
+    A stray credential is an environment problem and removing it solves it.
+    ``AEGIS_TOOLS=real`` without the opt-in is a *request* to run side-effecting
+    code, and there is nothing to delete: the only correct answer is still no.
+    """
+    runner = pytest.importorskip("evals.agentdojo.runner", reason="the evals extra is optional")
+    monkeypatch.setenv("AEGIS_TOOLS", "real")
+    monkeypatch.delenv("AEGIS_ALLOW_REAL_CREDENTIALS", raising=False)
     out_path = tmp_path / "out.json"
 
     exit_code = runner.main(["--logdir", str(tmp_path / "logs"), "--out", str(out_path)])
 
     assert exit_code == 2
     assert not out_path.exists()
-    stderr = capsys.readouterr().err
-    assert "GITHUB_TOKEN" in stderr
-    assert FAKE_GITHUB not in stderr
+    assert "AEGIS_ALLOW_REAL_CREDENTIALS" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------

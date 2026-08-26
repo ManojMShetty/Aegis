@@ -81,6 +81,7 @@ __all__ = [
     "real_credentials_allowed",
     "resolve_tool_mode",
     "scan_environment",
+    "scrub_environment",
 ]
 
 TOOL_MODE_ENV = "AEGIS_TOOLS"
@@ -265,6 +266,37 @@ def scan_environment(
         elif _CREDENTIAL_NAME_RE.search(name.upper()):
             findings.append(CredentialFinding(name, FindingKind.NAME_SHAPE))
     return tuple(findings)
+
+
+def scrub_environment(
+    *,
+    extra_model_provider_vars: frozenset[str] = frozenset(),
+) -> tuple[CredentialFinding, ...]:
+    """Delete real-tool credentials from THIS process, and report what went.
+
+    Why a benchmark run scrubs rather than refuses. :func:`enforce_sandbox` is the
+    right shape for a deployment: something is wrong, stop. But the eval runner is
+    a developer tool invoked from an ordinary shell, and an ordinary shell carries
+    credential-shaped variables that have nothing to do with this project - the
+    harness that launched it, an unrelated CLI, the operator's own tokens. Refusing
+    there does not remove the credential; it removes the run, and the documented
+    next step an operator will actually take is
+    ``AEGIS_ALLOW_REAL_CREDENTIALS=true``, which switches the guard off wholesale
+    and for everything.
+
+    So the guard that a person meets in daily use should make the environment
+    safe rather than make the command fail. Deleting the variable from
+    ``os.environ`` is strictly stronger than refusing to start beside it: after
+    this returns, the value is not in the process at all, so no tool loop, no
+    traceback and no subprocess can reach it - and the run proceeds.
+
+    Only NAMES are returned. The caller is expected to print them, and printing a
+    value would be the leak the whole guard exists to prevent.
+    """
+    findings = scan_environment(extra_model_provider_vars=extra_model_provider_vars)
+    for finding in findings:
+        os.environ.pop(finding.name, None)
+    return findings
 
 
 def enforce_sandbox(

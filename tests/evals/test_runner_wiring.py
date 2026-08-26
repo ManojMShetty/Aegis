@@ -1655,3 +1655,77 @@ def test_real_api_baseline_smoke(tmp_path: Path) -> None:
         logdir=tmp_path / "logs",
     )
     assert 0.0 <= (result["asr"] or 0.0) <= 1.0
+
+
+# --------------------------------------------------------------------------
+# Explicit task selection, and the caveat it must carry
+# --------------------------------------------------------------------------
+
+
+def test_explicit_task_ids_replace_the_first_n_selection(
+    wired: dict[str, Any], tmp_path: Path
+) -> None:
+    """Naming tasks runs those tasks, in numeric order, regardless of the caps.
+
+    This exists to make a cheap re-measurement possible: the couples that carry
+    the signal are usually a small subset, and re-running the whole grid to reach
+    them is most of the token bill.
+    """
+    result = runner.run_baseline(
+        max_tasks=8,
+        max_injection_tasks=4,
+        only_user_tasks=["user_task_3", "user_task_1"],
+        only_injection_tasks=["injection_task_2"],
+        logdir=tmp_path / "logs",
+        out_path=tmp_path / "out.json",
+    )
+
+    assert result["user_task_ids"] == ["user_task_1", "user_task_3"], (
+        "numeric order, not given order"
+    )
+    assert result["injection_task_ids"] == ["injection_task_2"]
+    clean_kwargs = wired["clean"].calls[0]["kwargs"]
+    assert clean_kwargs["user_tasks"] == ["user_task_1", "user_task_3"]
+
+
+def test_a_hand_picked_run_declares_itself_screening_only(
+    wired: dict[str, Any], tmp_path: Path
+) -> None:
+    """The number from a chosen subset must not be quotable as a rate.
+
+    The specific hazard is not smallness, it is SELECTION: choosing the couples a
+    previous arm failed on means the run can only observe failures the new arm
+    fixes, never failures it introduces. ASR is biased downward and a paired
+    p-value computed from it is invalid. The artifact says so about itself, so the
+    caveat cannot be lost between the run and the write-up.
+    """
+    picked = runner.run_baseline(
+        max_tasks=8,
+        max_injection_tasks=4,
+        only_user_tasks=["user_task_3"],
+        logdir=tmp_path / "logs",
+        out_path=tmp_path / "picked.json",
+    )
+    assert picked["screening_only"] is True
+    assert picked["task_selection"] == "explicit"
+
+    whole = runner.run_baseline(
+        max_tasks=4,
+        max_injection_tasks=2,
+        logdir=tmp_path / "logs2",
+        out_path=tmp_path / "whole.json",
+    )
+    assert whole["screening_only"] is False
+    assert whole["task_selection"] == "first-n"
+
+
+def test_an_unknown_task_id_is_refused_rather_than_dropped(
+    wired: dict[str, Any], tmp_path: Path
+) -> None:
+    """A typo that silently selected fewer tasks would under-report a rate."""
+    with pytest.raises(ValueError, match="does not have"):
+        runner.run_baseline(
+            only_user_tasks=["user_task_1", "user_task_nope"],
+            logdir=tmp_path / "logs",
+            out_path=tmp_path / "out.json",
+        )

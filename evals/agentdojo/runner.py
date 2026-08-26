@@ -164,7 +164,7 @@ from agentdojo.benchmark import (
 from agentdojo.logging import OutputLogger
 from agentdojo.task_suite.load_suites import get_suite
 
-from aegis.config.sandbox import SandboxViolation, enforce_sandbox
+from aegis.config.sandbox import SandboxViolation, enforce_sandbox, scrub_environment
 from aegis.security.capabilities import Verdict as GateVerdict
 from evals.agentdojo.defense import (
     AegisPipeline,
@@ -416,6 +416,9 @@ def select_task_ids(
     suite: Any,
     max_tasks: int,
     max_injection_tasks: int = DEFAULT_MAX_INJECTION_TASKS,
+    *,
+    only_user_tasks: Sequence[str] | None = None,
+    only_injection_tasks: Sequence[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Pick the first ``max_tasks`` user tasks and first ``max_injection_tasks``
     injection tasks, both in numeric order.
@@ -435,9 +438,43 @@ def select_task_ids(
         raise ValueError(
             f"--max-injection-tasks must be >= 1 to measure ASR, got {max_injection_tasks}"
         )
-    user_ids = _ordered_ids(suite.user_tasks.keys())[:max_tasks]
-    injection_ids = _ordered_ids(suite.injection_tasks.keys())[:max_injection_tasks]
+    if only_user_tasks is not None:
+        user_ids = _explicit_ids(only_user_tasks, suite.user_tasks.keys(), "--user-tasks")
+    else:
+        user_ids = _ordered_ids(suite.user_tasks.keys())[:max_tasks]
+    if only_injection_tasks is not None:
+        injection_ids = _explicit_ids(
+            only_injection_tasks, suite.injection_tasks.keys(), "--injection-tasks"
+        )
+    else:
+        injection_ids = _ordered_ids(suite.injection_tasks.keys())[:max_injection_tasks]
     return user_ids, injection_ids
+
+
+def _split_ids(spec: str | None) -> list[str] | None:
+    """Turn a comma-separated task-id flag into a list, or None when not given."""
+    if spec is None:
+        return None
+    return [part.strip() for part in spec.split(",") if part.strip()]
+
+
+def _explicit_ids(requested: Sequence[str], available: Iterable[str], flag: str) -> list[str]:
+    """Validate an explicitly named task set, refusing anything the suite lacks.
+
+    A typo that silently selected nothing would report metrics over a smaller set
+    than the operator asked for, and a smaller set is exactly what a restricted run
+    is already at risk of being misread as.
+    """
+    known = {str(task) for task in available}
+    unknown = [task for task in requested if task not in known]
+    if unknown:
+        raise ValueError(
+            f"{flag} names {len(unknown)} task(s) this suite does not have: "
+            f"{', '.join(sorted(unknown))}"
+        )
+    if not requested:
+        raise ValueError(f"{flag} was given no task ids")
+    return _ordered_ids(requested)
 
 
 def _mean(values: Iterable[object]) -> float | None:
@@ -793,6 +830,8 @@ def run_baseline(
     defense_layers: Sequence[str] | None = None,
     max_tasks: int = DEFAULT_MAX_TASKS,
     max_injection_tasks: int = DEFAULT_MAX_INJECTION_TASKS,
+    only_user_tasks: Sequence[str] | None = None,
+    only_injection_tasks: Sequence[str] | None = None,
     benchmark_version: str = DEFAULT_BENCHMARK_VERSION,
     resume: bool = False,
     logdir: Path = DEFAULT_LOGDIR,
@@ -867,7 +906,19 @@ def run_baseline(
     )
     pipeline, element = built.pipeline, built.element
     attack = _load_attack(attack_name, suite, pipeline)
-    user_ids, injection_ids = select_task_ids(suite, max_tasks, max_injection_tasks)
+    user_ids, injection_ids = select_task_ids(
+        suite,
+        max_tasks,
+        max_injection_tasks,
+        only_user_tasks=only_user_tasks,
+        only_injection_tasks=only_injection_tasks,
+    )
+    # A run over a hand-picked subset cannot be read as a rate over the suite, and
+    # the danger is specific: picking the couples a previous arm failed on means
+    # only failures-it-fixes can be observed, never failures-it-introduces. That
+    # biases ASR downward and makes a paired p-value invalid. Recorded in the
+    # artifact so the number cannot be quoted later without the caveat attached.
+    restricted = only_user_tasks is not None or only_injection_tasks is not None
 
     with OutputLogger(str(logdir)):
         clean = benchmark_suite_without_injections(
@@ -931,6 +982,8 @@ def run_baseline(
         "gate_ledger": _ledger_summary(built.aegis) if built.aegis is not None else None,
         "max_tasks": max_tasks,
         "max_injection_tasks": max_injection_tasks,
+        "task_selection": "explicit" if restricted else "first-n",
+        "screening_only": restricted,
         "user_task_ids": user_ids,
         "injection_task_ids": injection_ids,
         "n_user_tasks": len(user_ids),
@@ -1187,6 +1240,25 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--user-tasks",
+        default=None,
+        metavar="LIST",
+        help=(
+            "comma-separated user task ids to run INSTEAD of the first --max-tasks "
+            "(e.g. user_task_3,user_task_6). Marks the result screening_only: a "
+            "hand-picked subset is not a rate over the suite"
+        ),
+    )
+    parser.add_argument(
+        "--injection-tasks",
+        default=None,
+        metavar="LIST",
+        help=(
+            "comma-separated injection task ids to run INSTEAD of the first "
+            "--max-injection-tasks. Same caveat as --user-tasks"
+        ),
+    )
+    parser.add_argument(
         "--benchmark-version",
         default=DEFAULT_BENCHMARK_VERSION,
         help=f"AgentDojo benchmark version (default: {DEFAULT_BENCHMARK_VERSION})",
@@ -1218,6 +1290,33 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # FIRST, before any other validation. A stray credential in the environment is
+    # a hazard from the moment this process exists, and every line below it is a
+    # line during which a traceback could carry the value into a log. Scrubbing
+    # here also means an argument error cannot leave the credential in place while
+    # the operator retries - which is exactly what happened when this sat lower
+    # down: `--max-tasks 0` exited first and the token stayed.
+    declared_key_env: frozenset[str] = (
+        frozenset({args.api_key_env}) if args.api_key_env else frozenset()
+    )
+    removed = scrub_environment(extra_model_provider_vars=declared_key_env)
+    if removed:
+        names = ", ".join(finding.name for finding in removed)
+        print(
+            f"sandbox: removed {len(removed)} tool-credential-shaped variable(s) from "
+            f"this process before starting: {names} (names only; no value is read or "
+            "logged). The mock suites never need one.",
+            file=sys.stderr,
+        )
+    try:
+        # Scrubbing fixes a stray credential. It cannot fix AEGIS_TOOLS=real without
+        # the deliberate opt-in: that is a REQUEST to run side-effecting code, and
+        # there is nothing to delete. Still a refusal.
+        enforce_sandbox(extra_model_provider_vars=declared_key_env)
+    except SandboxViolation as exc:
+        print(f"refusing to start: {exc}", file=sys.stderr)
+        return 2
     if args.max_tasks < 1:
         parser.error("--max-tasks must be >= 1 (refusing to run with a non-positive cap)")
     if args.max_injection_tasks < 1:
@@ -1267,16 +1366,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     # first moment the run's own key variable is known: --api-key-env names the
     # MODEL-side variable for this run, which is legitimate under mock tools.
     # Anything else credential-shaped is a real TOOL credential, which the mock
-    # suites never need, and this process refuses to run beside one.
-    declared_key_env: frozenset[str] = (
-        frozenset({args.api_key_env}) if args.api_key_env else frozenset()
-    )
-    try:
-        enforce_sandbox(extra_model_provider_vars=declared_key_env)
-    except SandboxViolation as exc:
-        print(f"refusing to start: {exc}", file=sys.stderr)
-        return 2
-
     result = run_baseline(
         provider=args.provider,
         suite_name=args.suite,
@@ -1291,6 +1380,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         defense_layers=[layer.value for layer in layers],
         max_tasks=args.max_tasks,
         max_injection_tasks=args.max_injection_tasks,
+        only_user_tasks=_split_ids(args.user_tasks),
+        only_injection_tasks=_split_ids(args.injection_tasks),
         benchmark_version=args.benchmark_version,
         resume=args.resume,
         logdir=args.logdir,
