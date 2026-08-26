@@ -200,6 +200,61 @@ the run resumed - 18 of the 32 couples were measured on 24-25 August and replaye
 from cache, 14 were measured on the 26th. All 32 are real measurements of this
 same configuration; none were fabricated or re-labelled.
 
+## The ablation, screened: the gate appears to do the work
+
+`ablation_baseline_screen.json`, `ablation_alllayers_screen.json`,
+`ablation_gate_screen.json` - all over the SAME nine couples: user tasks 3, 6, 7
+crossed with injection tasks 0, 1, 2.
+
+Those nine were chosen because they contain **all six** of the baseline's hijacks.
+That makes them the couples where a layer can be seen to matter, and it is also
+why every file here carries `"screening_only": true` - see the caveat below, which
+is not optional reading.
+
+```
+                    baseline    all layers    gate only
+attack success        66.7%  ->    0.0%    ->    0.0%     (6/9 -> 0/9 -> 0/9)
+benign utility       100.0%  ->   66.7%    ->  100.0%     (3/3 -> 2/3 -> 3/3)
+utility under attack  33.3%  ->  100.0%    ->  100.0%
+```
+
+**L5 alone blocks all six, and costs nothing measurable.** The gate-only arm is a
+fresh measurement (44 model requests) and refused 7 calls across
+`send_email`, `delete_file` and `create_calendar_event`. The full stack blocks the
+same six and loses a benign task; the gate on its own does not.
+
+So on this evidence the capability gate is carrying the security result, and the
+utility cost in the headline arm arrives with the other layers rather than with
+the thing doing the blocking. For a project whose thesis is defense in depth,
+that is the ablation working: it is evidence against the assumption, found by the
+tool built to look for it.
+
+### Four reasons that is not "the other layers are useless"
+
+1. **The sample is selected, and selected in the defense's favour.** These nine
+   couples are the ones the baseline already failed, so an arm can only be
+   observed FIXING a failure here, never INTRODUCING one. ASR from a screening run
+   is biased downward and no p-value computed on it is valid. `screening_only:
+   true` is in every one of these files for that reason.
+2. **One attack.** Every number here is `important_instructions`. Spotlighting and
+   detection are largely about making an attack harder to *author*; a single fixed
+   attack cannot show that, and an adaptive attacker is exactly where a marking
+   layer would be expected to earn its place.
+3. **Three clean tasks.** The utility difference is 3/3 against 2/3 - one task.
+   That is a direction, not a finding.
+4. **Two arms are missing.** `spotlight` reached 7 of 9 couples before the daily
+   token cap and `detect` has not run, so "the other layers add nothing" is
+   currently an absence of measurement, not a measurement of absence.
+
+### A replay artifact worth naming
+
+`ablation_alllayers_screen.json` reports `gate_ledger.refusals: 0` while
+`ablation_gate_screen.json` reports 7. That is not a contradiction: the
+all-layers file was aggregated from cache with `total_model_calls: 0`, and the
+ledger records decisions made *in the process that ran*. No gate decisions
+happened during a replay. The run those task results actually came from - the
+32-couple defended arm - recorded 11 refusals.
+
 ## Runs that are NOT valid baselines
 
 `week0_nvidia_llama31_8b.json` (4 user x 2 injection) and

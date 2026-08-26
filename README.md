@@ -82,9 +82,10 @@ documented limits.
 **What this project contributes:** an integrated, reproducible reference implementation of
 these ideas as RAG middleware, with provenance carried through to the user-visible
 citation — plus a documented **residual-holes** analysis
-(see [`SECURITY.md`](SECURITY.md)). An **ablation** of each layer's marginal effect and
-an **adaptive-attacker** evaluation are the intended contribution and have **not been
-run** - see [What is not measured](#what-is-not-measured). The engineering and the
+(see [`SECURITY.md`](SECURITY.md)). An **ablation** of each layer's marginal effect has
+been run as a *screening* pass only - it already points at the L5 gate carrying the
+result - and an **adaptive-attacker** evaluation has **not been run** at all; both are
+qualified in [What is not measured](#what-is-not-measured). The engineering and the
 measurement are the contribution; the primitives are cited.
 
 ## Evaluation — no self-graded homework
@@ -293,10 +294,21 @@ the same way the Wilson interval is pinned against Newcombe. Binary relevance, t
   the baseline's 7 of 8. Three discordant pairs cannot separate a real cost from noise, so
   whether Aegis costs utility is **open**, not answered. Eight clean tasks is the smallest
   number in the whole comparison and the obvious next thing to widen.
-- **The per-layer ablation.** `--defense-layers` also accepts `spotlight`, `detect` and
-  `gate` individually, so each layer's own contribution can be measured the same way.
-  Those arms have not been run, so **which layer did the blocking is unknown** - the
-  headline is the whole stack, not evidence for any one of its parts.
+- **The per-layer ablation, properly.** A *screening* pass has been run and it points
+  somewhere uncomfortable: on the nine couples containing all six baseline hijacks,
+  **the L5 capability gate alone blocks all six and costs no measurable utility**
+  (utility 3/3), while the full stack blocks the same six and loses a benign task
+  (2/3). See [`results/README.md`](results/README.md#the-ablation-screened-the-gate-appears-to-do-the-work).
+
+  That is the ablation doing its job - evidence against this project's own
+  defense-in-depth premise, found by the tool built to look for it. It is **not** a
+  finding that the other layers are useless, for four reasons stated in full there:
+  the nine couples are selected in the defense's favour so no p-value is valid
+  (every such file carries `screening_only: true`); every number is one attack,
+  `important_instructions`, and marking layers are largely about making an attack
+  harder to *author*; the utility difference is one task out of three; and the
+  `spotlight` arm reached 7 of 9 couples before the daily token cap while `detect`
+  has not run at all. Absence of measurement, not measurement of absence.
 - **Retrieval with a real embedding model.** The `vector` arm above is TF-IDF cosine -
   lexical-semantic, not neural. It does not know that *car* and *automobile* are related,
   and the three missed queries are exactly where that costs. A sentence-transformer arm and
