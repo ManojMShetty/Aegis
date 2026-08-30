@@ -136,8 +136,15 @@ def main() -> int:
     print(f"attack blocked : {attack.blocked}")
     print(f"benign allowed : {benign.allowed}")
     print(f"\n{'PASS' if ok else 'FAIL'} - security held without breaking utility.")
-    print("\nNOTE: this is the mechanism demo. The *measured* claim (ASR / utility")
-    print("      on AgentDojo) is Week 0-2 work and is not yet produced.")
+    print("\nThis is the MECHANISM, on one hand-built example: it shows HOW a block")
+    print("happens, not how OFTEN. The measured claim is a separate thing entirely -")
+    print("on 32 paired AgentDojo couples the attack success rate went 18.8% (6/32)")
+    print("to 0.0% (0/32), exact McNemar p = 0.031, while benign utility went 7/8 to")
+    print("6/8 (not significant, and quoted alongside wherever the headline appears).")
+    print("\nRe-run that comparison yourself - no API key, no network, instant:")
+    print("\n    uv run python -m evals.stats.analysis \\")
+    print("        --baseline results/week0_baseline_wide.json \\")
+    print("        --defended results/week0_defended_wide.json")
     return 0 if ok else 1
 
 

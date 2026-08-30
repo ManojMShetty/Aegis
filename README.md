@@ -12,6 +12,28 @@
 
 ---
 
+## Try it in two minutes — no API key, no network, no cost
+
+```bash
+git clone https://github.com/ManojMShetty/Aegis && cd Aegis
+uv sync --group dev --extra evals        # the evals extra is required: tests/evals imports agentdojo
+```
+
+```bash
+uv run python scripts/demo_attack.py     # watch an injected exfiltration get refused, and a
+                                         # legitimate send_email still go through
+uv run python -m evals.retrieval.run     # the retrieval ablation, under a second
+uv run pytest -m "not costly"            # 763 tests, no key, no network
+
+# re-derive the headline p = 0.031 from the committed results
+uv run python -m evals.stats.analysis --baseline results/week0_baseline_wide.json --defended results/week0_defended_wide.json
+```
+
+Every one of those reads committed data or pure logic. **A key is needed only to run the
+AgentDojo benchmark again** — see [Reproducing these numbers](#reproducing-these-numbers).
+
+---
+
 ## The problem
 
 An LLM's context window has no trust boundary. A system instruction from the operator
@@ -36,7 +58,7 @@ Contain untrusted content **by construction**, in depth, so no single layer is l
 |---|---|---|
 | **L1** | **Provenance / taint** | Every chunk carries `{source, trust_tier, content_hash}`, propagated to the citation |
 | **L2** | **Spotlighting** | Untrusted spans are delimited/datamarked as inert data at the boundary |
-| **L3** | **Injection detector** | Cheap heuristics → local classifier → LLM judge on borderline. **Advisory, not the wall** |
+| **L3** | **Injection detector** | **Heuristic tier only** — the local-classifier and LLM-judge tiers are designed, not built. **Advisory, not the wall** |
 | **L4** | **Quarantined dual-LLM** | Untrusted text is read *only* by an isolated **no-tool** model returning schema-validated typed data |
 | **L5** | **Capability gating** | A tool fires only if the data driving it is trusted enough *and* the user authorized the action |
 
@@ -80,13 +102,42 @@ documented limits.
   **MELON**, **PromptArmor**, **IPIGuard**, **Meta SecAlign**
 
 **What this project contributes:** an integrated, reproducible reference implementation of
-these ideas as RAG middleware, with provenance carried through to the user-visible
-citation — plus a documented **residual-holes** analysis
+these ideas, with provenance carried through to the citation label a caller can render —
+plus a documented **residual-holes** analysis
 (see [`SECURITY.md`](SECURITY.md)). An **ablation** of each layer's marginal effect has
 been run as a *screening* pass only - it already points at the L5 gate carrying the
 result - and an **adaptive-attacker** evaluation has **not been run** at all; both are
 qualified in [What is not measured](#what-is-not-measured). The engineering and the
 measurement are the contribution; the primitives are cited.
+
+## What is a library here, and what is not
+
+This distinction matters more than the layer table, and an architectural review of this
+repository named getting it wrong as the single biggest overclaim in the project — so it
+is stated here rather than discovered.
+
+**A library, importable and framework-neutral.** The judgments are pure and have no
+knowledge of any agent framework: the trust lattice and `Tainted[T]`
+([`src/aegis/domain/trust.py`](src/aegis/domain/trust.py)), the capability gate
+([`capabilities.py`](src/aegis/security/capabilities.py)), the spotlighter, the heuristic
+detector, the quarantine extractor, the policy loader, and the retrieval and ingest
+modules. You can `pip install` this, import `CapabilityGate`, point it at your own
+`trust_tiers.yaml`, and get decisions.
+
+**Not yet a library: the runtime that makes those judgments usable in a tool loop.** The
+bookkeeping that turns a stream of tool results into "this argument descends from
+untrusted text" — the per-conversation taint state, the value-based argument attribution,
+the reset-between-tasks logic, the refusal-message contract — currently lives in
+[`evals/agentdojo/defense.py`](evals/agentdojo/defense.py) and speaks AgentDojo's message
+types. **So Aegis defends the agent in the benchmark; it cannot yet be dropped in front of
+your agent.** Extracting that runtime into `src/aegis/middleware/` behind a
+framework-neutral interface (tool name, arguments, prior tool outputs → decision) is the
+next milestone, and it is mostly a move rather than a rewrite.
+
+**Also worth knowing:** the retrieval half and the defense half share the trust domain but
+never meet at runtime. No retrieved chunk currently reaches an LLM or the defense adapter —
+the AgentDojo pipeline contains no retrieval, and the retrieval stack is exercised by its
+own evaluation and unit tests. One philosophy, two systems, honestly labelled.
 
 ## Evaluation — no self-graded homework
 
@@ -443,7 +494,7 @@ is scaffolding.
 ## Status
 
 **All five security layers (L1-L5) + retrieval core + retrieval eval: complete and
-verified.** 757 offline tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
+verified.** 763 offline tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
 database dependencies - pydantic and PyYAML only - and runs with no API key, no network
 and no database.
 
@@ -478,10 +529,14 @@ and no database.
 ## Development
 
 ```bash
-uv sync --group dev                  # core deps only — no ML/network needed
+uv sync --group dev --extra evals    # `evals` is NOT optional for the test suite: three
+                                     # files under tests/evals import agentdojo at module
+                                     # scope, so a core-only install fails COLLECTION, and
+                                     # `pytest -m security` fails with it (-m filters after
+                                     # collection, so it cannot rescue an import error)
 uv run python scripts/demo_attack.py # see the defense work, end to end, offline
 uv run pytest -m security            # the invariants the threat model depends on
-uv run pytest                        # full suite
+uv run pytest -m "not costly"        # full suite minus the two that would spend real quota
 uv run ruff check . && uv run mypy
 ```
 
@@ -491,22 +546,14 @@ no Postgres, and no API key — and cost nothing to run. The compose file's stru
 checked by parsing YAML, so that runs everywhere too; the single test that shells out to
 the Docker CLI skips cleanly when Docker is not installed.
 
-### Continuous integration — one manual step
+### Continuous integration
 
-`.github/workflows/ci.yml` exists in the working tree and runs the same four gates
-(`ruff format --check`, `ruff check`, `mypy`, `pytest -m "not costly"`), plus an assertion
-that no provider key is present so a `costly` test cannot fire in CI by accident. It is
-**not on the remote**: pushing anything under `.github/workflows/` requires a token with
-the `workflow` scope, which the client that authored the rest of this history does not
-hold. Push it from an environment that has one:
-
-```bash
-git add .github/workflows/ci.yml && git commit -m "Add CI workflow" && git push
-```
-
-`tests/security/test_ci_workflow.py` describes that file rather than the package, so it
-skips when the file is absent. A clone that never received it gets a green suite and a
-skip reason, not a red one — the workflow is genuinely missing, but nothing else is.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the same four gates on every
+push and pull request — `ruff format --check`, `ruff check`, `mypy`, and
+`pytest -m "not costly"` — plus a step that asserts no provider key is present, so a
+`costly` test cannot spend quota in CI even if the marker filter were removed by accident.
+It installs a hand-pinned set rather than running `uv sync`, and the header comment in the
+file explains why: sync PRUNES, and would delete the packages the eval tests import.
 
 ## License
 

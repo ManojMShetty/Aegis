@@ -164,6 +164,7 @@ from agentdojo.benchmark import (
 from agentdojo.logging import OutputLogger
 from agentdojo.task_suite.load_suites import get_suite
 
+from aegis.config.dotenv import load_dotenv
 from aegis.config.sandbox import SandboxViolation, enforce_sandbox, scrub_environment
 from aegis.security.capabilities import Verdict as GateVerdict
 from evals.agentdojo.defense import (
@@ -253,7 +254,14 @@ DEFAULT_DEFENSE_LAYERS: tuple[DefenseLayer, ...] = tuple(DefenseLayer)
 DEFENSE_LAYERS_ALL = "all"
 DEFENSE_LAYERS_NONE = "none"
 DEFAULT_LOGDIR = Path("results/raw/agentdojo_logs")
-DEFAULT_OUT = Path("results/week0_baseline.json")
+# NOT a curated path. results/ holds artifacts that cost real quota to produce and
+# are quoted in the README; a bare `python -m evals.agentdojo.runner` with a key
+# should never be able to overwrite one. That accident has already happened once in
+# this project's history - two NVIDIA runs sat at results/week0_baseline.json and
+# results/week0_baseline_wide.json, at the default output path, where the FILE NAME
+# asserted exactly what results/README.md says never to claim. Writing beside the
+# curated results is now something an operator has to ask for with --out.
+DEFAULT_OUT = Path("results/raw/last_run.json")
 
 # The fully-supported secondary endpoint, named here only so the --help usage
 # example and this module's docstring cannot drift from each other.
@@ -1290,6 +1298,13 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+
+    # Before the scrub, because a key in .env is exactly what the operator meant to
+    # give this process, and after it would be too late. It never overrides an
+    # exported variable, and the scrub below still removes anything it loaded that
+    # is shaped like a real TOOL credential - the file is a convenience, not a way
+    # around the guard.
+    load_dotenv()
 
     # FIRST, before any other validation. A stray credential in the environment is
     # a hazard from the moment this process exists, and every line below it is a

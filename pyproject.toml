@@ -9,45 +9,45 @@ license = { text = "MIT" }
 # Core stays deliberately light so `uv sync` is fast and the security domain
 # (trust lattice, capability gate) can be developed and unit-tested with zero
 # heavy/ML/network dependencies. Everything else lives in an extra.
+# Every name below is imported by code in this repository. That is the whole rule,
+# and it is worth stating because the manifest used to declare fifteen packages
+# nothing imported - sentence-transformers, torch, psycopg, pgvector, rank-bm25,
+# langgraph, fastapi, uvicorn, mcp, ranx, numpy, scipy, statsmodels,
+# pydantic-settings, structlog - while OMITTING two that are imported at module
+# scope (openai, tenacity), which CI had to pin by hand to make the suite collect.
+# A dependency list that describes an intended product rather than the code is a
+# quiet way of overstating what exists.
 dependencies = [
     "pydantic>=2.7",
-    "pydantic-settings>=2.3",
     "pyyaml>=6.0",
-    "structlog>=24.1",
 ]
 
 [project.optional-dependencies]
+# The Gemini provider and its HTTP transport. `anthropic` is deliberately absent:
+# no Anthropic provider is implemented, so declaring it would imply one.
 llm = [
-    "anthropic>=0.40",
     "httpx>=0.27",
 ]
-retrieval = [
-    "sentence-transformers>=3.0",
-    "torch>=2.2",
-    "psycopg[binary,pool]>=3.1",
-    "pgvector>=0.2.5",
-    "rank-bm25>=0.2.2",
-]
-agent = [
-    "langgraph>=0.2",
-    "langgraph-checkpoint-postgres>=2.0",
-]
-api = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.29",
-    "mcp>=1.0",
-]
+# Running the AgentDojo benchmark. The retrieval and statistics stacks need nothing
+# here - both are standard library by design - so numpy, scipy, statsmodels and ranx
+# are gone rather than installed and unused.
 evals = [
-    # External benchmark — we do not grade our own homework.
+    # External benchmark - we do not grade our own homework.
     # Verified to resolve on Python 3.13 / Windows (v0.1.35).
     "agentdojo>=0.1.35",
     # Gemini 3.x needs the AI Studio genai SDK directly (AgentDojo's GoogleLLM
     # is wrapped, not replaced, by evals/agentdojo/gemini_llm.py).
     "google-genai>=1.0",
-    "ranx>=0.3.20",
-    "numpy>=1.26",
-    "scipy>=1.12",
-    "statsmodels>=0.14",
+    # Imported at module scope by evals/agentdojo/openai_llm.py and gemini_llm.py.
+    # Available transitively through agentdojo, but pinned here because this code
+    # imports them directly and should say so.
+    "openai>=1.40",
+    "tenacity>=8.2",
+]
+# Measuring the token cost of spotlighting (scripts/estimate_defended_cost.py,
+# scripts/compare_datamarks.py). Not needed by any test.
+cost = [
+    "tiktoken>=0.7",
 ]
 
 [dependency-groups]

@@ -13,8 +13,11 @@ and the product never imports the eval harness at all.
 
 The first bench is AgentDojo (:mod:`evals.agentdojo`): a published prompt-injection
 suite we did not write, run against an *undefended* agent so the Week-0 baseline
-is an honest floor. The Aegis defense is deliberately not wired in yet - the
-baseline has to be the number an attacker gets with nothing standing in the way.
+is an honest floor: the number an attacker gets with nothing standing in the way.
+The Aegis defense is now wired in behind ``--defense aegis`` and measured against
+that floor over the same couples - 18.8% attack success to 0.0%, exact McNemar
+p = 0.031, with the benign-utility change reported alongside it because it moved
+the wrong way. See ``results/README.md`` for what may and may not be quoted.
 """
 
 from __future__ import annotations

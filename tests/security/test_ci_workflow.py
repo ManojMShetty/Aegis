@@ -28,6 +28,8 @@ happily when the phrase survives only in a comment.
 
 from __future__ import annotations
 
+import re
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -243,14 +245,36 @@ def test_the_install_pulls_nothing_heavy() -> None:
 
 
 def test_the_install_covers_what_the_eval_tests_import() -> None:
-    """These three are imported at module scope under ``tests/evals/``.
+    """These are imported at module scope under ``tests/evals/``.
 
     Without them those modules do not collect, and a suite that collects fewer
     tests still reports success - the exact failure this workflow must not have.
+
+    The check is on COVERAGE, not on spelling. CI once hand-pinned each package on
+    the install line because the `evals` extra did not declare them; now the extra
+    does, and pinning them twice would be a second list to keep in step with the
+    first. So a package counts as covered if the line names it OR names an extra
+    that declares it, and the extra's contents are read from pyproject.toml rather
+    than restated here - otherwise this test becomes the third copy of the same
+    list.
     """
     install = next(command for command in _run_commands() if "uv pip install" in command)
-    for package in ("agentdojo", "google-genai", "openai"):
-        assert package in install, f"the CI install omits {package!r}"
+
+    extras = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    optional = extras["project"]["optional-dependencies"]
+    named_extras = set(re.findall(r"\[([a-z,]+)\]", install))
+    covered = {
+        requirement.split(">")[0].split("=")[0].split("[")[0].strip()
+        for extra in named_extras
+        for name in extra.split(",")
+        for requirement in optional.get(name, ())
+    }
+
+    for package in ("agentdojo", "google-genai", "openai", "tenacity"):
+        assert package in install or package in covered, (
+            f"the CI install neither names {package!r} nor pulls it via an extra it "
+            f"installs; tests/evals imports it at module scope, so collection would fail"
+        )
 
 
 # --------------------------------------------------------------------------
