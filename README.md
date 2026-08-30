@@ -107,9 +107,9 @@ documented limits.
 these ideas, with provenance carried through to the citation label a caller can render —
 plus a documented **residual-holes** analysis
 (see [`SECURITY.md`](SECURITY.md)). An **ablation** of each layer's marginal effect has
-been run as a *screening* pass only - it already points at the L5 gate carrying the
-result - and an **adaptive-attacker** evaluation has **not been run** at all; both are
-qualified in [What is not measured](#what-is-not-measured). The engineering and the
+been run on a *screening* sample - all five arms, and it points at the L5 gate carrying
+the entire result - and an **adaptive-attacker** evaluation has **not been run** at all;
+both are qualified in [What is not measured](#what-is-not-measured). The engineering and the
 measurement are the contribution; the primitives are cited.
 
 ## What is a library here, and what is not
@@ -372,21 +372,29 @@ the same way the Wilson interval is pinned against Newcombe. Binary relevance, t
   the baseline's 7 of 8. Three discordant pairs cannot separate a real cost from noise, so
   whether Aegis costs utility is **open**, not answered. Eight clean tasks is the smallest
   number in the whole comparison and the obvious next thing to widen.
-- **The per-layer ablation, properly.** A *screening* pass has been run and it points
-  somewhere uncomfortable: on the nine couples containing all six baseline hijacks,
-  **the L5 capability gate alone blocks all six and costs no measurable utility**
-  (utility 3/3), while the full stack blocks the same six and loses a benign task
-  (2/3). See [`results/README.md`](results/README.md#the-ablation-screened-the-gate-appears-to-do-the-work).
+- **The per-layer ablation, beyond a screen.** All five add-one-layer arms have now
+  run, and they point somewhere uncomfortable. On the nine couples containing all six
+  baseline hijacks: `spotlight` alone scores 7/9 and `detect` alone 6/9 against a
+  baseline of 6/9 - neither moves ASR - while **the L5 capability gate alone blocks
+  all six at no measurable utility cost** (3/3), and the full stack blocks the same
+  six but loses a benign task (2/3). See
+  [`results/README.md`](results/README.md#the-ablation-screened-the-gate-appears-to-do-the-work).
 
   That is the ablation doing its job - evidence against this project's own
   defense-in-depth premise, found by the tool built to look for it. It is **not** a
-  finding that the other layers are useless, for four reasons stated in full there:
+  finding that the other layers are useless, for three reasons stated in full there:
   the nine couples are selected in the defense's favour so no p-value is valid
   (every such file carries `screening_only: true`); every number is one attack,
   `important_instructions`, and marking layers are largely about making an attack
-  harder to *author*; the utility difference is one task out of three; and the
-  `spotlight` arm reached 7 of 9 couples before the daily token cap while `detect`
-  has not run at all. Absence of measurement, not measurement of absence.
+  harder to *author*; and the utility difference is one task out of three. The
+  `detect` arm landing exactly on baseline is also the designed behaviour rather
+  than a failure - L3 is advisory, and the component that acts on a flag is the
+  gate that this arm has switched off.
+
+  What remains open is the **leave-one-out grid under an adaptive attacker**. Arms
+  that add one layer against a fixed attack cannot test the layers hypothesised to
+  matter when the attacker adapts to the gate, so that is the next measurement -
+  not more add-one-layer arms.
 - **Retrieval with a real embedding model.** The `vector` arm above is TF-IDF cosine -
   lexical-semantic, not neural. It does not know that *car* and *automobile* are related,
   and the three missed queries are exactly where that costs. A sentence-transformer arm and
@@ -550,7 +558,10 @@ and no database.
 - [x] Defense off vs on, paired at 16 couples: recorded, and not significant
 - [x] **Defense off vs on at 32 couples: ASR 18.8% to 0%, exact McNemar p = 0.031** — significant;
       benign utility 7/8 to 6/8 over the same run, not significant
-- [ ] Per-layer ablation: `spotlight` / `detect` / `gate` measured separately
+- [x] Per-layer ablation, screening sample: `spotlight` / `detect` / `gate` each measured
+      separately — **only the gate moves ASR** (6/9 baseline; 7/9, 6/9, then 0/9)
+- [ ] The same ablation on an unselected sample, and leave-one-out under an adaptive
+      attacker — the arms above cannot carry a p-value and say so
 - [x] Retrieval eval - recall@k / precision@k / MRR@k / nDCG@k, a committed golden set,
       and the four-arm ablation in one offline command
 - [x] Measured: **hybrid does not beat BM25 on this fixture** - RRF lands between its two

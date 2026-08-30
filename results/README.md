@@ -202,9 +202,10 @@ same configuration; none were fabricated or re-labelled.
 
 ## The ablation, screened: the gate appears to do the work
 
-`ablation_baseline_screen.json`, `ablation_alllayers_screen.json`,
-`ablation_gate_screen.json` - all over the SAME nine couples: user tasks 3, 6, 7
-crossed with injection tasks 0, 1, 2.
+Five arms - `ablation_baseline_screen.json`, `ablation_spotlight_screen.json`,
+`ablation_detect_screen.json`, `ablation_gate_screen.json`,
+`ablation_alllayers_screen.json` - all over the SAME nine couples: user tasks 3,
+6, 7 crossed with injection tasks 0, 1, 2.
 
 Those nine were chosen because they contain **all six** of the baseline's hijacks.
 That makes them the couples where a layer can be seen to matter, and it is also
@@ -212,16 +213,43 @@ why every file here carries `"screening_only": true` - see the caveat below, whi
 is not optional reading.
 
 ```
-                    baseline    all layers    gate only
-attack success        66.7%  ->    0.0%    ->    0.0%     (6/9 -> 0/9 -> 0/9)
-benign utility       100.0%  ->   66.7%    ->  100.0%     (3/3 -> 2/3 -> 3/3)
-utility under attack  33.3%  ->  100.0%    ->  100.0%
+arm                    layers on            ASR            benign utility
+baseline               -                 66.7%  (6/9)      100.0%  (3/3)
+spotlight only         L1+L2             77.8%  (7/9)      100.0%  (3/3)
+detect only            L1+L3             66.7%  (6/9)      100.0%  (3/3)
+gate only              L1+L5              0.0%  (0/9)      100.0%  (3/3)
+all layers             L1+L2+L3+L5        0.0%  (0/9)       66.7%  (2/3)
 ```
 
-**L5 alone blocks all six, and costs nothing measurable.** The gate-only arm is a
-fresh measurement (44 model requests) and refused 7 calls across
-`send_email`, `delete_file` and `create_calendar_event`. The full stack blocks the
-same six and loses a benign task; the gate on its own does not.
+Three of the five arms are fresh measurements: `spotlight`, `detect` and `gate`
+each carry `force_rerun: true`, `replayed: false` and 44-47 model requests. The
+other two - `baseline` and `all layers` - are `replayed: true` with
+`total_model_calls: 0`, aggregated from the 32-couple runs that already covered
+these nine couples under exactly these configurations. That is a legitimate reuse
+of a measurement, not a re-labelling of a different one, and the file says which
+it is; but it is also why the ledger counts in those two files read zero, which
+the note at the end of this section explains.
+
+**Only L5 moves ASR at all, and it moves it to zero at no measurable utility
+cost.** The gate-only arm refused 7 calls across `send_email`, `delete_file` and
+`create_calendar_event`. The full stack blocks the same six and loses a benign
+task; the gate on its own does not.
+
+The two middle rows deserve to be read precisely rather than as failures:
+
+* **`detect` alone lands exactly on the baseline, and that is what the design
+  says it should do.** L3 is documented as advisory - it records flags and lowers
+  an effective tier, and the thing that *acts* on a flag is the gate. With L5 off
+  there is no enforcement point, so a correctly-raised flag changes nothing. This
+  arm is better read as a check that the layer is wired the way the README claims
+  than as a test of whether detection helps.
+* **`spotlight` alone scored one hijack worse than baseline (7/9 against 6/9).**
+  On nine couples that is one couple, and the Wilson interval for 7/9 runs
+  roughly 45-94% against 35-88% for 6/9 - overlapping almost entirely. The honest
+  statement is that spotlighting alone shows **no protective effect here**, not
+  that it hurt. It is also the arm the token-cost note applies to: datamarking
+  bought nothing on this attack while adding about 68% to the tokens of every
+  untrusted span.
 
 So on this evidence the capability gate is carrying the security result, and the
 utility cost in the headline arm arrives with the other layers rather than with
@@ -229,7 +257,7 @@ the thing doing the blocking. For a project whose thesis is defense in depth,
 that is the ablation working: it is evidence against the assumption, found by the
 tool built to look for it.
 
-### Four reasons that is not "the other layers are useless"
+### Three reasons that is still not "the other layers are useless"
 
 1. **The sample is selected, and selected in the defense's favour.** These nine
    couples are the ones the baseline already failed, so an arm can only be
@@ -242,9 +270,18 @@ tool built to look for it.
    layer would be expected to earn its place.
 3. **Three clean tasks.** The utility difference is 3/3 against 2/3 - one task.
    That is a direction, not a finding.
-4. **Two arms are missing.** `spotlight` reached 7 of 9 couples before the daily
-   token cap and `detect` has not run, so "the other layers add nothing" is
-   currently an absence of measurement, not a measurement of absence.
+
+What the completed grid *does* let me say, which the partial one did not: the
+"other layers add nothing here" claim is now a measurement rather than an absence
+of one. All five arms ran. The reasons above are about what nine selected couples
+of one attack can support, not about missing data.
+
+The follow-on this points at is the leave-one-out grid rather than more
+add-one-layer arms. `spotlight` and `detect` are hypothesised to matter against an
+attacker who adapts to the gate - an attack authored to produce arguments that do
+not look tainted. Add-one-layer arms against a fixed attack cannot see that, so
+the useful next measurement is the full grid under an adaptive attacker, not more
+of this.
 
 ### A replay artifact worth naming
 
