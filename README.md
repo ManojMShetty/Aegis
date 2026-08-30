@@ -10,6 +10,11 @@
 > below carries its denominator and a 95% confidence interval, and the numbers come
 > from the harness in `evals/`, committed as JSON under [`results/`](results/).
 
+**[Read the evidence sheet](https://claude.ai/code/artifact/5703967d-cbaf-468b-b8cc-ed7c0e7f2f24)** —
+the same numbers as a single page: the paired result, the five-arm ablation that
+argues against this project's own defense-in-depth premise, and what the
+measurement does not cover.
+
 ---
 
 ## Try it in two minutes — no API key, no network, no cost
