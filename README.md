@@ -22,6 +22,8 @@ uv sync --group dev --extra evals        # the evals extra is required: tests/ev
 ```bash
 uv run python scripts/demo_attack.py     # watch an injected exfiltration get refused, and a
                                          # legitimate send_email still go through
+uv run python scripts/demo_middleware.py # the same defense driven from a hand-written tool
+                                         # loop - no agent framework imported anywhere
 uv run python -m evals.retrieval.run     # the retrieval ablation, under a second
 uv run pytest -m "not costly"            # 803 tests, no key, no network
 
