@@ -25,12 +25,14 @@ uv sync --group dev --extra evals        # the evals extra is required: tests/ev
 ```
 
 ```bash
+uv run python scripts/demo_ui.py         # ** the console ** - a browser page where you edit the
+                                         # poisoned text and the tool call and watch the verdict move
 uv run python scripts/demo_attack.py     # watch an injected exfiltration get refused, and a
                                          # legitimate send_email still go through
 uv run python scripts/demo_middleware.py # the same defense driven from a hand-written tool
                                          # loop - no agent framework imported anywhere
 uv run python -m evals.retrieval.run     # the retrieval ablation, under a second
-uv run pytest -m "not costly"            # 803 tests, no key, no network
+uv run pytest -m "not costly"            # 910 tests, no key, no network
 
 # re-derive the headline p = 0.031 from the committed results
 uv run python -m evals.stats.analysis --baseline results/week0_baseline_wide.json --defended results/week0_defended_wide.json
@@ -117,6 +119,74 @@ the entire result - and an **adaptive-attacker** evaluation has **not been run**
 both are qualified in [What is not measured](#what-is-not-measured). The engineering and the
 measurement are the contribution; the primitives are cited.
 
+## Where you would actually put this
+
+Aegis is not an application. It is middleware that sits inside somebody else's agent loop,
+at the seam between *a tool returned some text* and *the model wants to call a tool*. The
+three calls are the same everywhere; only where you hook them differs.
+
+| Where | Where the three calls go |
+|---|---|
+| **An OpenAI / Groq / any chat-completions tool loop** | `begin_turn` at the top of each iteration; `guard` on each tool result before appending it as the tool message; `decide` on `tool_calls` before executing, substituting `refusal_text` for a refused call's result |
+| **LangChain / LangGraph** | `guard` in `on_tool_end` (or a wrapper Runnable); `decide` in `on_agent_action`, or a node between the LLM node and the `ToolNode`; hold **one** middleware per thread on the graph state — a fresh instance per node can never refuse anything, which looks exactly like a working integration |
+| **An MCP server fronting real tools** | The strongest placement: the server is the only party that sees both sides of every call regardless of which client is driving. `guard` outbound results, `decide` inbound calls, return a refusal as an `isError` result |
+| **A RAG or document-QA service** | `guard` at the retriever boundary, one call per chunk, with `policy.resolve_tier(chunk.source_uri)` separating a curated corpus from a scraped page |
+| **CI, with no agent at all** | Skip the middleware: `SecurityPolicy.load().build_gate().check(tool, args, auth)` is pure logic, so "did this policy change break a benign flow?" is a unit test rather than a quarterly benchmark |
+
+Two things to carry over rather than discover. `known_tools` is your own registry — a call
+naming something absent from it is left ungated on purpose, because crediting the gate with
+refusing a hallucinated tool name pads the ledger with attacks that never had a tool to
+reach. And the default `AuthorizationContext(allow_all=True)` is a *measurement* escape
+hatch, not a deployment setting; pass real `granted_capabilities` outside the benchmark.
+
+**The honest caveat:** every one of these is a supported use of the library, and none of
+them is what the published measurement covers. The numbers below come from one adapter
+against AgentDojo. See [What is not measured](#what-is-not-measured).
+
+## The console — the only UI, and it runs offline
+
+```bash
+uv run python scripts/demo_ui.py      # http://127.0.0.1:8017
+```
+
+A browser page over the real layers: paste your own untrusted text, watch it get fenced,
+datamarked and flagged, then compose a tool call and watch the gate refuse it — with every
+tier, reason code and flag coming from an actual call into `aegis`, not from a fixture.
+Then change one argument and watch the same call go through.
+
+It needs **no API key, no network and no model**, because L1, L2, L3 and L5 are
+deterministic Python. The server is standard library only (no FastAPI — see the dependency
+rule in `pyproject.toml`), binds `127.0.0.1` as a constant rather than a flag, and serves
+exactly one static asset addressed by a module constant, so there is no path parameter to
+generalise into a file-read.
+
+Three of the shipped scenarios **end with the attacker winning**, and the page colours them
+as holes rather than as successes: reformat the recipient and the value-match misses; spell
+the argument `to_addr` instead of `to` and the policy's `high_risk_args` list does not
+apply; turn the gate off and the same call executes. Those are the residual holes from
+[`SECURITY.md`](SECURITY.md), made clickable — a defense demo that only shows the defense
+winning teaches the wrong lesson. A test runs every scenario through the real middleware
+and fails if any caption no longer matches what the gate does.
+
+What it does **not** do is run a benchmark. The measured figures it displays are read from
+the committed JSON in [`results/`](results/) and are labelled as quoted rather than
+computed, because they came from 32 AgentDojo couples through an adapter this package does
+not import. L4 is shown as unavailable rather than offered as a checkbox, which is also the
+truth about every measured arm.
+
+Adopters get the other half of it:
+
+```bash
+uv run python scripts/demo_ui.py --policy path/to/your/trust_tiers.yaml
+```
+
+Every verdict on the page is then produced by *your* policy — your sinks, your
+`high_risk_args`, your allowlists — so you can find out what your gate would do to your own
+tool calls before wiring any of it into an agent. The policy is re-read on each request, so
+edit the YAML and refresh. It is a server-side flag rather than a request field on purpose:
+a browser that could name a file path would be exactly the file-read primitive the server
+otherwise refuses to provide.
+
 ## What is a library here, and what is not
 
 This distinction matters more than the layer table, and an architectural review of this
@@ -165,6 +235,12 @@ The interface was designed against a single framework, so the next milestone is 
 *second* adapter against a real one — that is what turns "imports no framework" into
 "fits another framework", and it is the thing that will find whichever assumption
 AgentDojo quietly paid for.
+
+**Not part of that neutrality claim:** [`src/aegis/console/`](src/aegis/console/) is a tool
+*over* the library rather than a piece of it. It ships in the package because an adopter
+inspecting their own policy is a real use of it, but it is not something the middleware
+imports and not something a framework adapter needs — `import aegis.middleware` does not
+pull in a web server, and a test asserts the console imports no agent framework either.
 
 **Also worth knowing:** the retrieval half and the defense half share the trust domain but
 never meet at runtime. No retrieved chunk currently reaches an LLM or the defense adapter —
@@ -534,7 +610,7 @@ is scaffolding.
 ## Status
 
 **All five security layers (L1-L5) + retrieval core + retrieval eval: complete and
-verified.** 803 offline tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
+verified.** 910 offline tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
 database dependencies - pydantic and PyYAML only - and runs with no API key, no network
 and no database.
 
@@ -548,6 +624,9 @@ and no database.
 - [ ] Network-isolated benchmark run — `docker/` declares an `internal: true` network, but
       reaching a *hosted* model through it is impossible; needs a local model first
 - [x] Runnable worked example + interactive playground (detector auto-scans; attack blocked 4 ways; benign case allowed)
+- [x] **The console** (`src/aegis/console/`) — a browser UI over the real layers, offline and
+      standard-library only, shipping three residual holes as clickable scenarios whose
+      captions are verified against the runtime by a test
 - [x] AgentDojo verified installable on this toolchain (Python 3.13 / Windows, v0.1.35)
 - [x] **L4** Quarantine extractor - dual-LLM boundary; Pydantic-validated typed output, fail-closed, proven live against Gemini
 - [x] **Week 0** — AgentDojo baseline ASR + utility, at 16 couples and at 32
@@ -582,6 +661,7 @@ uv sync --group dev --extra evals    # `evals` is NOT optional for the test suit
                                      # scope, so a core-only install fails COLLECTION, and
                                      # `pytest -m security` fails with it (-m filters after
                                      # collection, so it cannot rescue an import error)
+uv run python scripts/demo_ui.py     # the console, on 127.0.0.1:8017
 uv run python scripts/demo_attack.py # see the defense work, end to end, offline
 uv run pytest -m security            # the invariants the threat model depends on
 uv run pytest -m "not costly"        # full suite minus the two that would spend real quota

@@ -142,9 +142,36 @@ Stating what a defense does *not* stop is part of the deliverable. Known residua
    L5 capability gate) are designed not to depend on string matching. Phase 2 measures
    exactly where each layer is robust and reports where it breaks, with the attacker's
    budget stated.
+4. **Taint is attributed by value match, so reformatting defeats it.** An argument is
+   treated as untrusted when its text appears verbatim in tool output this conversation
+   returned (see [`attribution.py`](src/aegis/middleware/attribution.py)). Write
+   `attacker @ evil.test` in the poisoned page and emit `attacker@evil.test` in the call —
+   or the reverse — and the match misses, so the send is allowed. This is a deliberate
+   trade: the sound alternative ("once any untrusted output is in the context, every later
+   argument is untrusted") refuses every side effect in every task that reads something
+   first, which is nearly all of them. It is the weaker rule that keeps the system usable,
+   and this is what it costs.
+5. **`high_risk_args` is a hand-written list of argument NAMES.** The rule that actually
+   stops exfiltration only applies to arguments the policy names. A deployment whose email
+   tool spells its recipient `to_addr` rather than `to` is unguarded for that argument until
+   someone notices and edits the YAML — the taint is still tracked and still visible, and
+   the gate simply does not act on it. Auditing `high_risk_args` against a deployment's real
+   tool schemas is a manual step this project does not automate.
 
 Results published from this repository will report residual attack success, not only the
-attacks that were stopped.
+attacks that were stopped. Holes 4 and 5 are not merely documented: they ship as clickable
+scenarios in the console (`uv run python scripts/demo_ui.py`), which renders them in a
+distinct colour from a successful defense, and a test asserts they still reproduce.
+
+### The console binds a socket
+
+`aegis.console` runs a local HTTP server, which is the only listening socket this
+repository creates. It binds `127.0.0.1` as a module constant with no flag to change it, so
+it is not reachable from the network; it serves exactly one static asset addressed by a
+constant, so there is no path parameter that could be generalised into a file read from a
+working directory that contains a gitignored `.env`; and it sends a `default-src 'none'`
+CSP so the page cannot acquire an external origin by accident. It is a developer tool and
+is not part of the eval path, which remains egress-free by network policy.
 
 ## Reporting a vulnerability
 

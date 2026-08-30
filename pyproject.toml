@@ -65,10 +65,17 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-# The security policy ships with the code. Without this the wheel would carry
-# the loader and not the file it loads, and an installed adopter would fail
-# closed on every tool call with no policy to inspect.
-artifacts = ["src/aegis/config/*.yaml"]
+# Non-Python files that are LOADED AT RUNTIME rather than merely shipped beside
+# the code. Both entries exist because the wheel would otherwise carry a loader
+# and not the file it loads:
+#   *.yaml - the security policy. Without it an installed adopter fails closed
+#            on every tool call with no policy to inspect.
+#   *.html - the console page, read by aegis.console.server at request time.
+#            Without it `python -m aegis.console.server` serves a 500 from a
+#            clean install while every test passes from a checkout - the exact
+#            shape of the three packaging defects this project already shipped
+#            once and only found by installing the wheel somewhere empty.
+artifacts = ["src/aegis/config/*.yaml", "src/aegis/console/*.html"]
 packages = ["src/aegis"]
 
 [tool.pytest.ini_options]

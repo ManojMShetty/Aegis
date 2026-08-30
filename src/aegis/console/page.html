@@ -1,0 +1,2595 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aegis Console</title>
+<style>
+/* ==========================================================================
+   Aegis Console — a single self-contained page.
+
+   No external anything: the server sends
+     default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';
+     connect-src 'self'; img-src data:
+   so every byte of style and script lives in this file, and the only network
+   traffic the page makes is same-origin fetch to /api/*.
+
+   COLOUR BUDGET (four hues, deliberately far apart, one job each)
+     brass   45deg   accent / chrome / focus / "this is live"
+     green  145deg   allowed
+     blue   225deg   blocked  (the defense held — calm, not alarming)
+     crimson 345deg  hole     (the attacker won — never the green of allowed)
+   The accent hue is never used to state an outcome, and no outcome hue is
+   ever used for chrome. Semantic states also carry a word and, for holes, a
+   hazard hatch, so nothing depends on colour alone.
+   ========================================================================== */
+
+:root {
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "Cascadia Code", "SFMono-Regular",
+          Menlo, Consolas, "Liberation Mono", monospace;
+
+  --bg: #e9ecf1;
+  --surface: #ffffff;
+  --surface-2: #f4f6f9;
+  --surface-3: #eaedf3;
+  --line: #d3d8e0;
+  --line-soft: #e3e7ed;
+  --line-strong: #aeb6c2;
+
+  --ink: #12151a;
+  --ink-2: #444c58;
+  --ink-3: #6d7684;
+  --ink-inv: #ffffff;
+
+  --accent: #7d5606;
+  --accent-line: #c79419;
+  --accent-soft: #fbf1d8;
+  --accent-strong: #a5740c;
+
+  --blocked: #12408f;
+  --blocked-line: #7d9ee0;
+  --blocked-soft: #e5ecfa;
+
+  --allowed: #0c6234;
+  --allowed-line: #6db98d;
+  --allowed-soft: #e0f1e7;
+
+  --hole: #9d0d33;
+  --hole-line: #e0879f;
+  --hole-soft: #fce5eb;
+
+  --quote-bg: #f1ede2;
+  --quote-line: #cbbf9f;
+  --quote-ink: #4a4536;
+
+  --shadow: 0 1px 0 rgba(16, 20, 28, .04), 0 2px 10px rgba(16, 20, 28, .05);
+  --radius: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1015;
+    --surface: #151920;
+    --surface-2: #1b2029;
+    --surface-3: #212734;
+    --line: #2a313d;
+    --line-soft: #222833;
+    --line-strong: #3d4756;
+
+    --ink: #e7ebf1;
+    --ink-2: #a6b0be;
+    --ink-3: #78828f;
+    --ink-inv: #0d1015;
+
+    --accent: #e2b348;
+    --accent-line: #a07c1c;
+    --accent-soft: #2c2410;
+    --accent-strong: #f0c463;
+
+    --blocked: #93b3ff;
+    --blocked-line: #38508a;
+    --blocked-soft: #151d33;
+
+    --allowed: #62cb8c;
+    --allowed-line: #2c6544;
+    --allowed-soft: #0f2519;
+
+    --hole: #ff8199;
+    --hole-line: #7d2a3d;
+    --hole-soft: #2c1219;
+
+    --quote-bg: #191712;
+    --quote-line: #4a412c;
+    --quote-ink: #b9b09a;
+
+    --shadow: 0 1px 0 rgba(0, 0, 0, .3), 0 2px 12px rgba(0, 0, 0, .35);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+.wrap {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px 22px 64px;
+}
+
+/* ---------- masthead ---------------------------------------------------- */
+
+.masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px 26px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.mast-id { min-width: 0; flex: 1 1 380px; }
+
+.mast-name {
+  margin: 0;
+  font-size: clamp(23px, 2.3vw, 31px);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+}
+.mast-name .mk {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: .62em;
+  letter-spacing: 0;
+  vertical-align: .18em;
+  margin-right: .35em;
+}
+
+.mast-sub {
+  margin: 6px 0 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  max-width: 74ch;
+}
+
+.mast-badge {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-end;
+  text-align: right;
+  min-width: 0;
+}
+
+.arm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.arm .dot {
+  width: 7px; height: 7px; flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.arm-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .11em;
+  color: var(--ink-3);
+}
+.offline {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: .01em;
+}
+
+/* ---------- status strip ------------------------------------------------ */
+
+#status { margin-top: 12px; }
+#status:empty { display: none; }
+
+.note-strip {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 8px 11px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.note-strip.err {
+  border-color: var(--hole-line);
+  background: var(--hole-soft);
+  color: var(--hole);
+}
+.note-strip .k {
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+.note-strip .v { word-break: break-word; }
+
+/* ---------- layer rail -------------------------------------------------- */
+
+.rail-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: baseline;
+  margin: 22px 0 9px;
+}
+.rail-head h2 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color: var(--ink);
+}
+.rail-head p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.rail {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.layer {
+  background: var(--surface);
+  padding: 11px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.layer.on { background: var(--accent-soft); }
+.layer.fixed { background: var(--surface-2); }
+.layer.absent {
+  background: repeating-linear-gradient(
+    135deg, var(--surface-2) 0 7px, var(--surface-3) 7px 14px);
+}
+
+.layer-top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.layer-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: .02em;
+}
+.layer-name {
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.layer-note {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--ink-3);
+  margin: 0;
+}
+.layer-ctl { display: flex; align-items: center; gap: 7px; }
+.layer-ctl label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .09em;
+  color: var(--ink-2);
+}
+.layer-ctl input { accent-color: var(--accent-strong); width: 15px; height: 15px; margin: 0; }
+
+.layer-state {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  padding: 3px 7px;
+  border-radius: 2px;
+  border: 1px dashed var(--line-strong);
+  color: var(--ink-3);
+  align-self: flex-start;
+  background: transparent;
+}
+.layer-style {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.layer-style select {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 3px 5px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.aside-note {
+  border-top: 1px dashed var(--line);
+  padding-top: 6px;
+  font-style: italic;
+}
+
+/* ---------- panels ------------------------------------------------------ */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel > header {
+  padding: 12px 14px 11px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .13em;
+  color: var(--ink-3);
+  margin: 0 0 4px;
+}
+.kicker .live {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent-strong);
+  flex: 0 0 auto;
+}
+.panel h2 {
+  margin: 0;
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.blurb {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 78ch;
+}
+.body { padding: 13px 14px 15px; min-width: 0; }
+
+/* ---------- stage grid -------------------------------------------------- */
+
+.stage {
+  margin-top: 22px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr);
+  grid-template-areas:
+    "input   call"
+    "guard   verdict"
+    "trace   trace";
+  align-items: start;
+}
+.p-input   { grid-area: input; }
+.p-call    { grid-area: call; }
+.p-guard   { grid-area: guard; }
+.p-verdict { grid-area: verdict; }
+.p-trace   { grid-area: trace; }
+
+@media (max-width: 1080px) {
+  .stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "input" "call" "verdict" "trace" "guard";
+  }
+  .rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .rail { grid-template-columns: minmax(0, 1fr); }
+  .wrap { padding: 16px 12px 48px; }
+}
+
+/* ---------- form bits --------------------------------------------------- */
+
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field > .lab, .lab {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--ink-3);
+}
+
+select, input[type="text"], textarea, button {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  padding: 7px 9px;
+  min-width: 0;
+  max-width: 100%;
+}
+select { font-family: var(--sans); cursor: pointer; }
+input[type="text"], textarea { font-family: var(--mono); font-size: 12.5px; }
+textarea {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  line-height: 1.55;
+  tab-size: 2;
+}
+input:disabled, select:disabled, textarea:disabled, button:disabled {
+  opacity: .55; cursor: not-allowed;
+}
+
+button {
+  cursor: pointer;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  background: var(--surface-3);
+}
+button:hover:not(:disabled) { border-color: var(--ink-3); }
+
+.btn-run {
+  background: var(--ink);
+  color: var(--ink-inv);
+  border-color: var(--ink);
+  padding: 9px 18px;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.btn-run:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+
+.btn-mini {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 8px;
+  font-weight: 600;
+}
+
+.arg-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.62fr) minmax(0, 1.38fr) auto;
+  gap: 7px;
+  margin-bottom: 7px;
+  align-items: center;
+}
+.arg-row input { width: 100%; }
+.arg-empty {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  padding: 8px 0 10px;
+  border-top: 1px dashed var(--line);
+  border-bottom: 1px dashed var(--line);
+  margin-bottom: 9px;
+}
+.row-actions { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; margin-top: 11px; }
+.hint {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+/* ---------- chips ------------------------------------------------------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: .01em;
+  padding: 2px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip.on      { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+.chip.blocked { border-color: var(--blocked-line); background: var(--blocked-soft); color: var(--blocked); }
+.chip.allowed { border-color: var(--allowed-line); background: var(--allowed-soft); color: var(--allowed); }
+.chip.hole    { border-color: var(--hole-line); background: var(--hole-soft); color: var(--hole); }
+.chip.danger  { border-color: var(--hole-line); background: var(--hole-soft); color: var(--hole); }
+.chip.quiet   { border-style: dashed; color: var(--ink-3); background: transparent; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* ---------- key/value grid ---------------------------------------------- */
+
+.kv {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 14px;
+  font-size: 12.5px;
+  align-items: baseline;
+}
+.kv dt {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.kv dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+@media (max-width: 560px) {
+  .kv { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .kv dd { margin-bottom: 7px; }
+}
+
+/* ---------- tables ------------------------------------------------------ */
+
+.scroll-x {
+  overflow-x: auto;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface);
+}
+table { border-collapse: collapse; width: 100%; }
+th, td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+thead th {
+  position: sticky; top: 0;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: var(--ink-3);
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: none; }
+td.mono, th.mono { font-family: var(--mono); font-size: 12px; }
+td.wrap-any { word-break: break-word; }
+
+/* ---------- guard ------------------------------------------------------- */
+
+.pane-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.pre {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  padding: 10px 11px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  max-height: 260px;
+  overflow: auto;
+}
+.pre.raw { border-left: 3px solid var(--hole-line); }
+.pre.shown { border-left: 3px solid var(--accent-line); }
+.pre.reason { max-height: 200px; }
+
+.dmark {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-weight: 700;
+}
+.fence {
+  color: var(--blocked);
+  background: var(--blocked-soft);
+  font-weight: 700;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+/* A zero-width character sitting in the text. Blue, like the fence, because it
+   is part of the same machinery — L2 breaks the input's marker words with one. */
+.zwsp {
+  color: var(--blocked);
+  background: var(--blocked-soft);
+  border: 1px solid var(--blocked-line);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-weight: 700;
+}
+/* Marker-shaped text that arrived in the input. Never styled as .fence: the
+   whole point of the break-out attempt is that it wants to be mistaken for one. */
+.forged {
+  color: var(--hole);
+  background: var(--hole-soft);
+  border: 1px dashed var(--hole-line);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-weight: 700;
+}
+mark.hit {
+  background: var(--hole-soft);
+  color: var(--hole);
+  box-shadow: inset 0 -2px 0 var(--hole-line);
+  border-radius: 1px;
+  padding: 0 1px;
+}
+
+.sub-h {
+  font-family: var(--mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--ink-3);
+  margin: 0 0 5px;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.sub-h .aside { text-transform: none; letter-spacing: 0; font-size: 11px; }
+
+.toggle-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  cursor: pointer;
+  margin: 0 0 10px;
+}
+.toggle-line input { accent-color: var(--accent-strong); margin: 0; }
+
+.callout {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  border-left: 3px solid var(--line-strong);
+  padding: 2px 0 2px 11px;
+  margin: 11px 0 0;
+}
+.callout.warn {
+  border-left-color: var(--accent-line);
+  background: var(--accent-soft);
+  padding: 8px 11px;
+  border-radius: 0 3px 3px 0;
+  color: var(--ink);
+}
+
+/* ---------- verdict ----------------------------------------------------- */
+
+.verdict-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 13px 14px;
+  border: 2px solid var(--line-strong);
+  border-radius: 3px;
+  margin-bottom: 13px;
+}
+.verdict-banner .action {
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  font-family: var(--mono);
+}
+.verdict-banner .gloss {
+  font-size: 12.5px;
+  color: var(--ink-2);
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.vb-blocked { border-color: var(--blocked-line); background: var(--blocked-soft); }
+.vb-blocked .action { color: var(--blocked); }
+.vb-allowed { border-color: var(--allowed-line); background: var(--allowed-soft); }
+.vb-allowed .action { color: var(--allowed); }
+.vb-hole {
+  border-color: var(--hole-line);
+  color: var(--ink);
+  background:
+    repeating-linear-gradient(135deg,
+      var(--hole-soft) 0 10px, transparent 10px 20px);
+}
+.vb-hole .action { color: var(--hole); }
+.vb-open { border-style: dashed; border-color: var(--allowed-line); background: transparent; }
+.vb-open .action { color: var(--allowed); }
+
+/* ---------- argument trace (the centrepiece) ---------------------------- */
+
+.p-trace {
+  border: 1px solid var(--line-strong);
+  border-top: 3px solid var(--accent-line);
+}
+.p-trace > header { padding: 15px 16px 13px; }
+.p-trace h2 { font-size: 20px; letter-spacing: -0.02em; }
+.p-trace .blurb { font-size: 13px; max-width: 96ch; }
+.p-trace .body { padding: 14px 16px 18px; }
+
+.trace-table td { font-size: 12.5px; }
+.trace-table tbody tr { cursor: pointer; }
+.trace-table tbody tr:hover { background: var(--surface-2); }
+.trace-table tbody tr.tainted { background: var(--hole-soft); }
+.trace-table tbody tr.tainted:hover { filter: brightness(.985); }
+.trace-table tbody tr.sel { box-shadow: inset 3px 0 0 var(--accent-strong); }
+.trace-table td.argname { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+.trace-table td.val {
+  font-family: var(--mono);
+  word-break: break-word;
+  min-width: 170px;
+  max-width: 360px;
+}
+.trace-table td.why { font-size: 12px; color: var(--ink-2); min-width: 210px; }
+.synthetic-tag {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-top: 3px;
+}
+
+/* ---------- scenarios --------------------------------------------------- */
+
+.section { margin-top: 30px; }
+.section > header { margin-bottom: 12px; }
+.section h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.scen-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr));
+  gap: 16px;
+}
+.scen-group {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 13px 14px 15px;
+  box-shadow: var(--shadow);
+}
+.scen-group > h3 {
+  margin: 0 0 3px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.scen-group > p { margin: 0 0 11px; font-size: 12px; color: var(--ink-3); }
+
+.scen-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 3px;
+  padding: 9px 11px;
+  margin-bottom: 7px;
+  font-weight: 500;
+}
+.scen-btn:hover:not(:disabled) { background: var(--surface-3); }
+.scen-btn .st {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  margin-bottom: 5px;
+  color: var(--ink);
+}
+.scen-btn.o-blocked { border-left-color: var(--blocked-line); }
+.scen-btn.o-allowed { border-left-color: var(--allowed-line); }
+.scen-btn.o-hole    { border-left-color: var(--hole-line); }
+.scen-btn.active {
+  border-color: var(--accent-line);
+  border-left-color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.scen-card {
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  padding: 12px 13px;
+  margin-bottom: 13px;
+  background: var(--surface-2);
+}
+.scen-card.stale { opacity: .82; border-style: dashed; }
+.scen-card h3 { margin: 0 0 6px; font-size: 14.5px; letter-spacing: -0.015em; }
+.scen-card p { margin: 0 0 7px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.scen-card p.teaches {
+  margin: 9px 0 0;
+  padding: 8px 11px;
+  border-left: 3px solid var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--ink);
+  border-radius: 0 3px 3px 0;
+}
+.scen-card .stale-warn {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--hole);
+  margin: 8px 0 0;
+}
+
+/* ---------- honesty (quoted, not computed) ------------------------------ */
+
+.honesty {
+  background: var(--quote-bg);
+  border: 1px solid var(--quote-line);
+  border-left: 6px double var(--quote-line);
+  border-radius: var(--radius);
+  padding: 16px 18px 18px;
+  color: var(--quote-ink);
+}
+.honesty h2, .honesty h3 { color: var(--ink); }
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .16em;
+  color: var(--quote-ink);
+  border: 1.5px solid var(--quote-line);
+  border-radius: 2px;
+  padding: 4px 9px;
+  margin-bottom: 10px;
+}
+.honesty .blurb { color: var(--quote-ink); }
+.honesty table { background: transparent; }
+.honesty .scroll-x { background: transparent; border-color: var(--quote-line); }
+.honesty thead th { background: transparent; border-bottom-color: var(--quote-line); color: var(--quote-ink); }
+.honesty th, .honesty td { border-bottom-color: var(--quote-line); }
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 1px;
+  background: var(--quote-line);
+  border: 1px solid var(--quote-line);
+  border-radius: 3px;
+  margin: 13px 0;
+  overflow: hidden;
+}
+.stat {
+  background: var(--quote-bg);
+  padding: 11px 12px 12px;
+  min-width: 0;
+}
+.stat .sl {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--quote-ink);
+  display: block;
+  margin-bottom: 5px;
+}
+.stat .sv {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  display: block;
+  line-height: 1.1;
+}
+.stat .sv .arrowto { color: var(--quote-ink); font-weight: 400; padding: 0 3px; }
+.stat .sn { display: block; margin-top: 4px; font-size: 11px; color: var(--quote-ink); }
+
+.paired-n {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  line-height: 1.1;
+}
+.paired-n.good { color: var(--allowed); }
+.paired-n.bad { color: var(--hole); }
+.paired-note {
+  font-family: var(--sans);
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--quote-ink);
+  margin-top: 3px;
+  max-width: 22ch;
+}
+.paired-rh {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--quote-ink);
+  white-space: nowrap;
+}
+
+.caveats { margin: 14px 0 0; padding-left: 19px; }
+.caveats li { margin-bottom: 6px; font-size: 12.5px; line-height: 1.5; }
+.caveats strong { color: var(--ink); }
+
+/* ---------- policy ------------------------------------------------------ */
+
+.pol-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.lattice { display: flex; flex-direction: column; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 3px; overflow: hidden; }
+.tier-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) minmax(0, auto);
+  gap: 6px 10px;
+  align-items: center;
+  background: var(--surface);
+  padding: 7px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.tier-row > * { min-width: 0; }
+.tier-row .tl { overflow-wrap: anywhere; }
+.tier-row .tv { font-weight: 700; color: var(--ink-3); }
+.tier-row.att { background: var(--hole-soft); }
+.tier-row.auth .tl { color: var(--blocked); font-weight: 700; }
+
+footer.foot {
+  margin-top: 34px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  line-height: 1.6;
+  max-width: 96ch;
+}
+footer.foot code { font-family: var(--mono); color: var(--ink-2); }
+
+.sr {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="mast-id">
+      <h1 class="mast-name"><span class="mk">[&#9679;]</span>Aegis Console</h1>
+      <p class="mast-sub">An instrument panel over the real Aegis defense layers. Give it text a tool
+        returned, propose the call the model wants to make next, and watch the middleware decide &mdash;
+        the same code path the benchmark harness runs.</p>
+    </div>
+    <div class="mast-badge">
+      <span class="arm-label">current arm</span>
+      <span class="arm" id="arm"><span class="dot"></span><span id="arm-text">loading&hellip;</span></span>
+      <span class="offline">offline &mdash; no API key, no network, no model</span>
+    </div>
+  </header>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <div class="rail-head">
+    <h2>Defense layers</h2>
+    <p>Three switches. Flipping one re-runs the turn immediately, so the arm label above always
+      describes what you are looking at.</p>
+  </div>
+  <nav class="rail" id="rail" aria-label="Defense layers"></nav>
+
+  <main class="stage">
+
+    <section class="panel p-input" aria-labelledby="h-input">
+      <header>
+        <p class="kicker"><span class="live"></span>Left of the trust boundary</p>
+        <h2 id="h-input">The untrusted input</h2>
+        <p class="blurb">Text a tool returned this turn. Attacker-controlled by assumption: the console
+          never grants it authority, whatever it says about itself. Edit it freely &mdash; taint is
+          matched against these exact bytes.</p>
+      </header>
+      <div class="body">
+        <div class="field" style="margin-bottom:11px">
+          <label class="lab" for="preset">preset page</label>
+          <select id="preset"></select>
+        </div>
+        <label class="sr" for="page-text">Untrusted page text</label>
+        <textarea id="page-text" spellcheck="false"></textarea>
+        <p class="hint">Empty means <strong>no tool returned anything this turn</strong> &mdash; a
+          different statement from &ldquo;a tool returned nothing suspicious&rdquo;. Press Run after
+          editing. Try pasting a fake fence such as <code>&lt;&lt;UNTRUSTED_abc&gt;&gt;</code> and
+          then switching L2 off: that is a break-out attempt, and the guard panel names it as one.</p>
+      </div>
+    </section>
+
+    <section class="panel p-call" aria-labelledby="h-call">
+      <header>
+        <p class="kicker"><span class="live"></span>Right of the trust boundary</p>
+        <h2 id="h-call">The tool call to judge</h2>
+        <p class="blurb">The call the model wants to make next. The gate judges the values these
+          arguments carry and where they came from &mdash; not whether anyone meant well.</p>
+      </header>
+      <div class="body">
+        <div class="field" style="margin-bottom:13px">
+          <label class="lab" for="tool">tool</label>
+          <select id="tool"></select>
+        </div>
+        <p class="lab" style="margin-bottom:7px">arguments</p>
+        <div id="args"></div>
+        <div class="row-actions">
+          <button type="button" class="btn-mini" id="add-arg">+ add argument</button>
+          <button type="button" class="btn-run" id="run">Run this turn</button>
+        </div>
+        <p class="hint">A tool with no arguments is not a way past the gate &mdash; try
+          <code>post_webpage</code> with the argument list empty.</p>
+      </div>
+    </section>
+
+    <section class="panel p-guard" aria-labelledby="h-guard">
+      <header>
+        <p class="kicker"><span class="live"></span>L1 &middot; L2 &middot; L3 &mdash; computed live</p>
+        <h2 id="h-guard">What the guard did to the input</h2>
+        <p class="blurb">L1 records where the text came from. L2 rewrites it so the model can see where
+          data starts and stops. L3 reads it for injection patterns and raises advisory flags. None of
+          these three refuses anything &mdash; that is L5's job.</p>
+      </header>
+      <div class="body" id="guard-body"></div>
+    </section>
+
+    <section class="panel p-verdict" aria-labelledby="h-verdict">
+      <header>
+        <p class="kicker"><span class="live"></span>L5 &mdash; computed in this process, <span id="ran-at">&mdash;</span></p>
+        <h2 id="h-verdict">The decision</h2>
+        <p class="blurb">Produced just now, from the two editors above. Nothing on this panel is quoted,
+          cached or replayed &mdash; compare the archival panel further down.</p>
+      </header>
+      <div class="body" id="verdict-body"></div>
+    </section>
+
+    <section class="panel p-trace" aria-labelledby="h-trace">
+      <header>
+        <p class="kicker"><span class="live"></span>Why the verdict came out that way</p>
+        <h2 id="h-trace">Argument trace</h2>
+        <p class="blurb">One row per argument of the proposed call. <strong>An argument is untrusted
+          because its text appears in what a tool returned this turn</strong> &mdash; not because it
+          looks malicious, not because it is on a list. <code>matched_tools</code> names the tool whose
+          output contains it; that match, and nothing else, is what drops the tier. Click a row to
+          highlight where its value occurs in the raw input.</p>
+      </header>
+      <div class="body" id="trace-body"></div>
+    </section>
+
+  </main>
+
+  <section class="section" aria-labelledby="h-scen">
+    <header>
+      <h2 id="h-scen">Scenarios</h2>
+      <p class="blurb">Each button runs a fixed turn through this same code path and then loads it into
+        the editors, so you can change one thing and watch what moves. Every caption below is checked
+        against the runtime in CI &mdash; if the policy changes and a caption stops being true, the
+        build fails rather than the page lying.</p>
+    </header>
+    <div id="scen-card"></div>
+    <div class="scen-cols" id="scen-cols"></div>
+  </section>
+
+  <section class="section" aria-labelledby="h-honesty">
+    <div class="honesty">
+      <span class="stamp">Quoted &mdash; not computed on this page</span>
+      <h2 id="h-honesty">What was actually measured</h2>
+      <p class="blurb">Everything above this line was computed a moment ago, in this process, from what
+        you typed. <strong>Nothing below this line was.</strong> These figures were read out of benchmark
+        JSON committed to the repository; the console does not run AgentDojo, has no API key and never
+        talks to a model. The archival tint and the double rule are there so the two kinds of claim can
+        never be mistaken for one another.</p>
+      <div id="measured-body"></div>
+      <h3 style="margin:20px 0 4px;font-size:14px;letter-spacing:-0.01em">The five-arm ablation</h3>
+      <p class="blurb" style="margin-top:0">A screen over a small slice, run to find out which layer was
+        doing the work. Only the gate moved the attack success rate; spotlighting alone moved it the
+        wrong way.</p>
+      <div id="ablation-body"></div>
+      <ul class="caveats" id="caveats"></ul>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-policy">
+    <header>
+      <h2 id="h-policy">The policy this ran against</h2>
+      <p class="blurb">The gate has no opinions of its own. Every rule it applied came out of one YAML
+        file, loaded fresh on each request &mdash; tiers by source pattern, sinks by tool name, and a
+        hand-written list of high-risk argument names per tool.</p>
+    </header>
+    <div class="pol-cols" id="policy-body"></div>
+  </section>
+
+  <footer class="foot" id="foot"></footer>
+
+</div>
+
+<script>
+"use strict";
+(function () {
+
+/* =========================================================================
+   DOM helpers. Every value that came from the API reaches the page through
+   textContent or createTextNode; innerHTML is never used with payload data
+   (or, in fact, at all). The page renders attacker-authored strings by design.
+   ========================================================================= */
+
+function el(tag, cls, text) {
+  var n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined && text !== null) n.textContent = String(text);
+  return n;
+}
+function add(parent) {
+  for (var i = 1; i < arguments.length; i++) {
+    var k = arguments[i];
+    if (k === null || k === undefined) continue;
+    parent.appendChild(k);
+  }
+  return parent;
+}
+function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); return node; }
+function txt(s) { return document.createTextNode(String(s)); }
+function byId(id) { return document.getElementById(id); }
+
+function kv(pairs) {
+  var dl = el("dl", "kv");
+  pairs.forEach(function (p) {
+    if (p === null || p === undefined) return;
+    add(dl, el("dt", null, p[0]));
+    var dd = el("dd");
+    if (p[1] instanceof Node) dd.appendChild(p[1]);
+    else dd.textContent = (p[1] === "" || p[1] === null || p[1] === undefined) ? "—" : String(p[1]);
+    add(dl, dd);
+  });
+  return dl;
+}
+function chip(text, cls) { return el("span", "chip" + (cls ? " " + cls : ""), text); }
+function chipList(values, classify, emptyText) {
+  var box = el("div", "chips");
+  if (!values || !values.length) { box.appendChild(chip(emptyText || "none", "quiet")); return box; }
+  values.forEach(function (v) { box.appendChild(chip(v, classify ? classify(v) : null)); });
+  return box;
+}
+function table(headers, rows, cls) {
+  var wrap = el("div", "scroll-x");
+  var t = el("table", cls || null);
+  var thead = el("thead"), tr = el("tr");
+  headers.forEach(function (h) { tr.appendChild(el("th", null, h)); });
+  thead.appendChild(tr);
+  t.appendChild(thead);
+  var tb = el("tbody");
+  rows.forEach(function (r) { tb.appendChild(r); });
+  t.appendChild(tb);
+  wrap.appendChild(t);
+  return wrap;
+}
+function td(content, cls) {
+  var c = el("td", cls || null);
+  if (content instanceof Node) c.appendChild(content);
+  else c.textContent = (content === "" || content === null || content === undefined) ? "—" : String(content);
+  return c;
+}
+function bool(v) { return chip(v ? "yes" : "no", v ? "on" : "quiet"); }
+
+/* =========================================================================
+   State. Nothing about a verdict, tier, code, flag or policy fact is stored
+   here as a literal: the only constants below are structural wiring (which
+   checkbox drives which request field) and presentational labels keyed on
+   values the API itself returned, each with a fall-through to the raw value.
+   ========================================================================= */
+
+var LAYER_FIELD = { L2: "spotlight", L3: "detect", L5: "gate" };
+
+var GROUP_TITLE = {
+  mechanism: "How the mechanism behaves",
+  limit: "Where it stops working"
+};
+var GROUP_BLURB = {
+  mechanism: "The defense doing what it claims, including the case it has to let through.",
+  limit: "Cases the design does not cover. Three of these end in the attacker’s favour and are labelled as such."
+};
+var OUTCOME_WORD = {
+  blocked: "call refused",
+  allowed: "call allowed — correctly",
+  hole: "attacker wins"
+};
+
+var S = {
+  boot: null,
+  run: null,
+  scenario: null,
+  scenarioStale: false,
+  layers: {},              /* spotlight/detect/gate, seeded from boot.layers[].state */
+  spotlightStyle: null,    /* learned from the first response; never invented */
+  tool: "",
+  args: [],                /* [{name, value}] */
+  pageText: "",
+  showMarks: true,
+  focusArg: null,
+  busy: false,
+  tierInfo: {},            /* label -> boot tier record */
+  blockingFlags: {}
+};
+
+/* =========================================================================
+   Transport
+   ========================================================================= */
+
+function setStatus(kind, key, message) {
+  var host = clear(byId("status"));
+  if (!kind) return;
+  var strip = el("div", "note-strip" + (kind === "err" ? " err" : ""));
+  add(strip, el("span", "k", key), el("span", "v", message));
+  host.appendChild(strip);
+}
+
+function api(path, options) {
+  return fetch(path, options).then(function (res) {
+    return res.text().then(function (raw) {
+      var data = null;
+      try { data = JSON.parse(raw); } catch (e) { data = null; }
+      if (data === null) {
+        throw new Error("HTTP " + res.status + " — the response was not JSON");
+      }
+      if (!res.ok || (data && typeof data.error === "string")) {
+        throw new Error("HTTP " + res.status + " — " + (data.error || "request failed"));
+      }
+      return data;
+    });
+  });
+}
+
+function setBusy(on) {
+  S.busy = on;
+  byId("run").disabled = on;
+  var btns = document.querySelectorAll(".scen-btn");
+  for (var i = 0; i < btns.length; i++) btns[i].disabled = on;
+  if (on) setStatus("info", "running", "computing this turn in the server process…");
+}
+
+function fail(err) {
+  setBusy(false);
+  setStatus("err", "error", err && err.message ? err.message : String(err));
+}
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+
+api("/api/boot").then(function (boot) {
+  S.boot = boot;
+
+  (boot.tiers || []).forEach(function (t) { S.tierInfo[t.label] = t; });
+  ((boot.policy && boot.policy.blocking_flags) || []).forEach(function (f) { S.blockingFlags[f] = true; });
+
+  (boot.layers || []).forEach(function (layer) {
+    var field = LAYER_FIELD[layer.id];
+    if (field && layer.toggleable) S.layers[field] = (layer.state === "on");
+  });
+
+  renderRail();
+  renderPresets();
+  renderToolSelect();
+  renderScenarioButtons();
+  renderMeasured();
+  renderAblation();
+  renderCaveats();
+  renderPolicyStatic();
+  renderFoot();
+  wireEvents();
+
+  var first = (boot.scenarios && boot.scenarios[0]) ? boot.scenarios[0].key : null;
+  if (first) loadScenario(first);
+  else runTurn();
+}).catch(fail);
+
+/* =========================================================================
+   Layer rail
+   ========================================================================= */
+
+function renderRail() {
+  var rail = clear(byId("rail"));
+  (S.boot.layers || []).forEach(function (layer) {
+    var field = LAYER_FIELD[layer.id];
+    var interactive = !!(layer.toggleable && field);
+    var cell = el("div", "layer " + (interactive ? (S.layers[field] ? "on" : "") : (layer.state === "always on" ? "fixed" : "absent")));
+    cell.id = "layer-" + layer.id;
+
+    var top = el("div", "layer-top");
+    add(top, el("span", "layer-id", layer.id), el("span", "layer-name", layer.name));
+    cell.appendChild(top);
+
+    if (interactive) {
+      var ctl = el("div", "layer-ctl");
+      var lab = el("label");
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = !!S.layers[field];
+      box.id = "chk-" + field;
+      box.addEventListener("change", function () {
+        S.layers[field] = box.checked;
+        runTurn();
+      });
+      add(lab, box, el("span", null, box.checked ? "on" : "off"));
+      ctl.appendChild(lab);
+      cell.appendChild(ctl);
+      if (layer.id === "L2") cell.appendChild(styleControl());
+    } else {
+      /* Not a disabled checkbox: a switch that looks tickable is a lie about
+         what this console can do. */
+      cell.appendChild(el("span", "layer-state", layer.state));
+    }
+
+    cell.appendChild(el("p", "layer-note", layer.note));
+    if (interactive && layer.id === "L2") {
+      cell.appendChild(el("p", "layer-note aside-note",
+        "That token figure was measured for datamark. delimit fences the span without " +
+        "touching its whitespace; encode replaces it with base64. Switch style and watch " +
+        "the pane below change."));
+    }
+    rail.appendChild(cell);
+  });
+  syncRail();
+}
+
+/* Populated from boot.spotlight_styles, never from a list written here: the page
+   has no business naming a style the server did not offer. Until the first
+   response reports which style actually ran, the control says so rather than
+   claiming one. */
+function styleControl() {
+  var wrap = el("div", "layer-style");
+  var sel = document.createElement("select");
+  sel.id = "l2-style";
+  sel.setAttribute("aria-label", "spotlight style");
+  var placeholder = el("option", null, "(as configured)");
+  placeholder.value = "";
+  sel.appendChild(placeholder);
+  (S.boot.spotlight_styles || []).forEach(function (name) {
+    var o = el("option", null, name);
+    o.value = name;
+    sel.appendChild(o);
+  });
+  sel.addEventListener("change", function () {
+    if (!sel.value) return;
+    S.spotlightStyle = sel.value;
+    runTurn();
+  });
+  add(wrap, el("span", "lab", "style"), sel);
+  return wrap;
+}
+
+function syncRail() {
+  (S.boot.layers || []).forEach(function (layer) {
+    var field = LAYER_FIELD[layer.id];
+    if (!field || !layer.toggleable) return;
+    var cell = byId("layer-" + layer.id);
+    var box = byId("chk-" + field);
+    if (!cell || !box) return;
+    box.checked = !!S.layers[field];
+    cell.className = "layer" + (box.checked ? " on" : "");
+    var word = box.parentNode.querySelector("span");
+    if (word) word.textContent = box.checked ? "on" : "off";
+  });
+  var st = byId("l2-style");
+  if (st) {
+    if (S.spotlightStyle) {
+      var first = st.querySelector("option");
+      if (first && first.value === "") st.removeChild(first);
+      st.value = S.spotlightStyle;
+    }
+    /* Off, not hidden: the style still exists, it just does nothing while L2
+       is down, and the arm label says as much. */
+    st.disabled = !S.layers.spotlight;
+  }
+}
+
+/* =========================================================================
+   Editors
+   ========================================================================= */
+
+function renderPresets() {
+  var sel = clear(byId("preset"));
+  var none = el("option", null, "(nothing was read this turn — empty input)");
+  none.value = "";
+  sel.appendChild(none);
+  (S.boot.pages || []).forEach(function (p) {
+    var o = el("option", null, p.label);
+    o.value = p.key;
+    sel.appendChild(o);
+  });
+  var custom = el("option", null, "(edited by hand)");
+  custom.value = "__custom__";
+  custom.disabled = true;
+  sel.appendChild(custom);
+}
+
+function syncPresetSelect() {
+  var sel = byId("preset");
+  var match = "";
+  var found = false;
+  if (S.pageText !== "") {
+    (S.boot.pages || []).forEach(function (p) {
+      if (!found && p.text === S.pageText) { match = p.key; found = true; }
+    });
+    if (!found) match = "__custom__";
+  }
+  sel.value = match;
+}
+
+function renderToolSelect() {
+  var sel = clear(byId("tool"));
+  (S.boot.tools || []).forEach(function (t) {
+    var o = el("option", null, t);
+    o.value = t;
+    sel.appendChild(o);
+  });
+}
+
+function renderArgs() {
+  var host = clear(byId("args"));
+  if (!S.args.length) {
+    host.appendChild(el("div", "arg-empty", "no arguments — the call takes none"));
+    return;
+  }
+  S.args.forEach(function (a, i) {
+    var row = el("div", "arg-row");
+
+    var name = document.createElement("input");
+    name.type = "text";
+    name.className = "arg-name";
+    name.value = a.name;
+    name.placeholder = "name";
+    name.setAttribute("aria-label", "argument name " + (i + 1));
+    name.addEventListener("change", function () { runTurn(); });
+
+    var value = document.createElement("input");
+    value.type = "text";
+    value.className = "arg-value";
+    value.value = a.value;
+    value.placeholder = "value";
+    value.setAttribute("aria-label", "argument value " + (i + 1));
+    value.addEventListener("change", function () { runTurn(); });
+
+    var del = el("button", "btn-mini", "✕");
+    del.type = "button";
+    del.title = "remove this argument";
+    del.setAttribute("aria-label", "remove argument " + (i + 1));
+    del.addEventListener("click", function () {
+      harvest();
+      S.args.splice(i, 1);
+      renderArgs();
+      runTurn();
+    });
+
+    add(row, name, value, del);
+    host.appendChild(row);
+  });
+}
+
+/* Read the editors back out of the DOM before anything acts on them. A change
+   event fires on blur, but a click that both blurs a field and triggers a run
+   should not race with itself. */
+function harvest() {
+  S.pageText = byId("page-text").value;
+  var rows = byId("args").querySelectorAll(".arg-row");
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    out.push({
+      name: rows[i].querySelector(".arg-name").value,
+      value: rows[i].querySelector(".arg-value").value
+    });
+  }
+  S.args = out;
+}
+
+function wireEvents() {
+  byId("preset").addEventListener("change", function () {
+    var key = byId("preset").value;
+    if (key === "__custom__") return;
+    harvest();
+    var text = "";
+    (S.boot.pages || []).forEach(function (p) { if (p.key === key) text = p.text; });
+    S.pageText = text;
+    byId("page-text").value = text;
+    runTurn();
+  });
+
+  byId("page-text").addEventListener("change", function () {
+    S.pageText = byId("page-text").value;
+    syncPresetSelect();
+  });
+
+  byId("tool").addEventListener("change", function () {
+    S.tool = byId("tool").value;
+    runTurn();
+  });
+
+  byId("add-arg").addEventListener("click", function () {
+    harvest();
+    S.args.push({ name: "", value: "" });
+    renderArgs();
+    var rows = byId("args").querySelectorAll(".arg-row .arg-name");
+    if (rows.length) rows[rows.length - 1].focus();
+  });
+
+  byId("run").addEventListener("click", function () { runTurn(); });
+}
+
+/* =========================================================================
+   Running
+   ========================================================================= */
+
+function requestBody() {
+  var args = {};
+  S.args.forEach(function (a) {
+    var n = a.name.trim();
+    if (n) args[n] = a.value;
+  });
+  var layers = {
+    spotlight: !!S.layers.spotlight,
+    detect: !!S.layers.detect,
+    gate: !!S.layers.gate
+  };
+  /* Only ever echoed back, never chosen here: the set of styles is not part of
+     any payload this page receives, so the page has no business naming one. */
+  if (S.spotlightStyle) layers.spotlight_style = S.spotlightStyle;
+  return {
+    page_text: S.pageText,
+    tool: S.tool,
+    args: args,
+    tools: (S.boot.tools || []).slice(),
+    layers: layers
+  };
+}
+
+function runTurn() {
+  if (!S.boot) return;
+  harvest();
+  syncPresetSelect();
+  setBusy(true);
+  S.scenarioStale = !!S.scenario;
+  api("/api/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(requestBody())
+  }).then(function (result) {
+    setBusy(false);
+    setStatus(null);
+    applyResult(result);
+  }).catch(fail);
+}
+
+function loadScenario(key) {
+  setBusy(true);
+  api("/api/scenario/" + encodeURIComponent(key)).then(function (result) {
+    setBusy(false);
+    setStatus(null);
+    S.scenario = result.scenario || null;
+    S.scenarioStale = false;
+    syncEditorsFrom(result);
+    applyResult(result);
+  }).catch(fail);
+}
+
+/* The editors are refilled from the RESPONSE, not from a local copy of what a
+   scenario contains, so what you can edit is exactly what was judged. */
+function syncEditorsFrom(result) {
+  S.pageText = (result.guard && typeof result.guard.raw === "string") ? result.guard.raw : "";
+  byId("page-text").value = S.pageText;
+  syncPresetSelect();
+
+  S.tool = (result.decision && result.decision.tool) ? result.decision.tool : S.tool;
+  byId("tool").value = S.tool;
+
+  S.args = (result.arguments || [])
+    .filter(function (a) { return !a.synthetic; })
+    .map(function (a) { return { name: a.name, value: a.value }; });
+  renderArgs();
+
+  if (result.layers) {
+    S.layers.spotlight = !!result.layers.spotlight;
+    S.layers.detect = !!result.layers.detect;
+    S.layers.gate = !!result.layers.gate;
+  }
+}
+
+function applyResult(result) {
+  S.run = result;
+  S.focusArg = null;
+  if (result.layers) {
+    S.layers.spotlight = !!result.layers.spotlight;
+    S.layers.detect = !!result.layers.detect;
+    S.layers.gate = !!result.layers.gate;
+    if (result.layers.spotlight_style) S.spotlightStyle = result.layers.spotlight_style;
+  }
+  byId("arm-text").textContent = result.arm;
+  byId("ran-at").textContent = "at " + new Date().toLocaleTimeString();
+  syncRail();
+  renderGuard();
+  renderVerdict();
+  renderTrace();
+  renderScenarioCard();
+  renderToolPolicy();
+  markActiveScenario();
+}
+
+/* =========================================================================
+   Guard panel
+   ========================================================================= */
+
+function renderGuard() {
+  var host = clear(byId("guard-body"));
+  var g = S.run.guard;
+
+  if (!g) {
+    add(host, el("p", "callout warn",
+      "No tool returned anything this turn, so there was nothing to guard. " +
+      "That is why the trace below finds no argument traceable to tool output — " +
+      "not because the guard looked and found the input clean."));
+    return;
+  }
+
+  add(host, kv([
+    ["source", g.source],
+    ["tier", tierChip(g.tier)],
+    ["spotlight style", g.spotlight_style
+      ? chip(g.spotlight_style, "on")
+      : chip("none — L2 is off", "quiet")],
+    ["rewritten", bool(g.rewritten)],
+    ["fenced", bool(g.fenced)],
+    ["datamarked", bool(g.datamarked)],
+    ["encoded", bool(g.encoded)]
+  ]));
+
+  add(host, el("p", "callout",
+    "Those four describe the configuration that actually ran. They are not a search of the " +
+    "output text, so no amount of marker-shaped input can make them read true — which is the " +
+    "next line."));
+
+  /* A property of the attacker's text, never a claim about ours. Pasting a
+     marker and flipping L2 off is precisely the exercise this console is for. */
+  if (g.contains_forged_fence) {
+    add(host, el("p", "callout warn",
+      "Break-out attempt: this untrusted text is itself carrying marker-shaped content — it is " +
+      "trying to close the fence early so that whatever follows reads as trusted. That is a fact " +
+      "about the input, not about what L2 built. " +
+      (g.fenced
+        ? "L2 is on, and the forgery fails twice over: the real tag is drawn afresh for every span, " +
+          "so text copied from an earlier fence cannot match the one now in force — and L2 has " +
+          "broken the marker words the input supplied by inserting a zero-width character into " +
+          "them. Tick “show marks” and the ⌀ shows you where."
+        : "L2 is off, so nothing neutralises it — and the booleans above still read false, because " +
+          "they come from the configuration that ran rather than from searching the text for a " +
+          "marker the attacker supplied.") +
+      " L3 raises this as its own signal; look for it below."));
+  }
+
+  var cp = "U+" + g.datamark.codePointAt(0).toString(16).toUpperCase();
+
+  if (g.fenced || g.datamarked || g.contains_forged_fence) {
+    var label;
+    if (g.datamarked) {
+      label = "show marks — render each " + cp + " datamark as · and tint the fence markers. " +
+        "A rendering aid only: in the real string that character is invisible and takes no width.";
+    } else if (g.fenced) {
+      label = "show marks — tint the fence markers. This style inserts no " + cp + " datamark, " +
+        "so there is nothing invisible here to reveal.";
+    } else {
+      label = "show marks — highlight the marker-shaped text the input is carrying. L2 built no " +
+        "fence here, so anything marker-shaped below belongs to the attacker.";
+    }
+    var marksLine = el("label", "toggle-line");
+    marksLine.style.marginTop = "13px";
+    var marksBox = document.createElement("input");
+    marksBox.type = "checkbox";
+    marksBox.checked = S.showMarks;
+    marksBox.addEventListener("change", function () { S.showMarks = marksBox.checked; renderGuard(); });
+    add(marksLine, marksBox, el("span", null, label));
+    host.appendChild(marksLine);
+  }
+
+  var shownHead = el("p", "sub-h");
+  add(shownHead, el("span", null, "shown to the model"), el("span", "aside", styleAside(g)));
+  host.appendChild(shownHead);
+  var shownPre = el("pre", "pre shown");
+  renderShown(shownPre, g.shown, g.datamark, S.showMarks, cp, g.fenced);
+  host.appendChild(shownPre);
+  if (g.contains_forged_fence && S.showMarks) {
+    add(host, el("p", "hint", g.fenced
+      ? "Blue = the fence L2 built, whose tag is drawn afresh for this span. ⌀ = a zero-width "
+        + "character L2 inserted into the input's own marker words, which is what stops them being "
+        + "read as a fence. Crimson dashed, if any survives, = marker-shaped text left intact."
+      : "Crimson dashed = marker-shaped text that arrived in the input. Nothing here is a fence — "
+        + "L2 is off, so none was built, and nothing broke the input's markers either."));
+  }
+
+  var rawHead = el("p", "sub-h");
+  add(rawHead, el("span", null, "raw — exactly what the tool returned"),
+      el("span", "aside", S.focusArg
+        ? "highlighting where the value of “" + S.focusArg + "” occurs"
+        : "click a row in the argument trace to locate a value here"));
+  host.appendChild(rawHead);
+  var rawPre = el("pre", "pre raw");
+  renderRaw(rawPre, g.raw);
+  host.appendChild(rawPre);
+
+  if (g.guidance) {
+    var gh = el("p", "sub-h");
+    add(gh, el("span", null, "guidance prepended to the system prompt"));
+    host.appendChild(gh);
+    var gp = el("pre", "pre");
+    gp.style.maxHeight = "150px";
+    gp.textContent = g.guidance;
+    host.appendChild(gp);
+  }
+
+  host.appendChild(el("p", "sub-h", "L3 — injection detection"));
+  if (!g.detection) {
+    add(host, el("p", "callout warn",
+      "L3 is off — this is not the same statement as “L3 found nothing”. " +
+      "No detector ran, so no flag exists to be absent. Switch L3 on above to ask the question."));
+    return;
+  }
+
+  var d = g.detection;
+  add(host, kv([
+    ["verdict", chip(d.verdict, d.verdict === "clean" ? "quiet" : "danger")],
+    ["score", chip(String(d.score))],
+    ["flags", chipList(d.flags, flagClass, "no flags raised")]
+  ]));
+
+  if (!d.signals.length) {
+    add(host, el("p", "callout",
+      "The detector ran and raised nothing. On the quiet page that is the correct answer and the " +
+      "gate still refuses the send — which is the argument for not making a pattern detector " +
+      "load-bearing."));
+  } else {
+    var rows = d.signals.map(function (s) {
+      var tr = el("tr");
+      add(tr,
+        td(chip(s.flag, flagClass(s.flag))),
+        td(s.category, "mono"),
+        td(chip(s.severity, s.severity === "high" ? "danger" : null)),
+        td(s.evidence, "mono wrap-any"));
+      return tr;
+    });
+    host.appendChild(table(["flag", "category", "severity", "evidence"], rows));
+    add(host, el("p", "callout",
+      "Signals are advisory. They change nothing on their own — the gate is what turns a " +
+      "blocking flag into a refusal, and the flags marked as blocking come from the policy file, " +
+      "not from the detector."));
+  }
+}
+
+/* What this spotlight style actually did, stated from the API's own booleans
+   rather than from anything the page believes about a style name. */
+function styleAside(g) {
+  if (!g.spotlight_style) return "identical to raw — L2 is off, so nothing was marked";
+  var how = (g.fenced ? "fenced" : "not fenced") + ", " +
+            (g.datamarked ? "datamarked" : "not datamarked");
+  if (g.encoded) how += " — the whole span was re-encoded instead";
+  return g.spotlight_style + ": " + how;
+}
+
+function flagClass(flag) { return S.blockingFlags[flag] ? "danger" : "quiet"; }
+
+function tierChip(label) {
+  var info = S.tierInfo[label];
+  var cls = null;
+  if (info) cls = info.attacker_influenced ? "danger" : (info.instruction_authority ? "blocked" : null);
+  var c = chip(label, cls);
+  if (info) {
+    c.title = "tier value " + info.value +
+      "; instruction authority: " + (info.instruction_authority ? "yes" : "no") +
+      "; attacker influenced: " + (info.attacker_influenced ? "yes" : "no");
+  }
+  return c;
+}
+
+/* Only markers carrying the tag L2 actually drew are rendered as a fence.
+   Anything else marker-shaped came in with the untrusted text, and painting it
+   the same blue would be the page telling the exact lie the attacker is
+   attempting. The real tag is random per span, so this cannot be spoofed. */
+function renderShown(node, text, mark, showMarks, cp, fenced) {
+  clear(node);
+  var re = /<<\/?UNTRUSTED_([^>]*)>>/g;
+  var realTag = null;
+  if (fenced) {
+    var probe = /<<\/?UNTRUSTED_([^>]*)>>/.exec(text);
+    if (probe) realTag = probe[1];
+  }
+  var last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    pushMarked(node, text.slice(last, m.index), mark, showMarks, cp);
+    if (!showMarks) {
+      node.appendChild(txt(m[0]));
+    } else if (realTag !== null && m[1] === realTag) {
+      node.appendChild(el("span", "fence", m[0]));
+    } else {
+      var forged = el("span", "forged", m[0]);
+      forged.title = "marker-shaped text carried by the input — not a fence L2 built";
+      node.appendChild(forged);
+    }
+    last = re.lastIndex;
+  }
+  pushMarked(node, text.slice(last), mark, showMarks, cp);
+}
+
+var INVISIBLE = /[​‌‍⁠﻿]/;
+
+/* Reveals every character that occupies no width: the datamark L2 substitutes
+   for whitespace, and the zero-width character it inserts into marker words
+   carried by the input. Both are literally invisible in the real string, so a
+   pane that rendered them faithfully would show the reader nothing. */
+function pushMarked(node, chunk, mark, showMarks, cp) {
+  if (!chunk) return;
+  if (!showMarks) { node.appendChild(txt(chunk)); return; }
+  var buf = "";
+  var flush = function () { if (buf) { node.appendChild(txt(buf)); buf = ""; } };
+  for (var i = 0; i < chunk.length; i++) {
+    var ch = chunk.charAt(i);
+    if (mark && ch === mark) {
+      flush();
+      var d = el("span", "dmark", "·");
+      d.title = cp + " datamark (invisible in the real string)";
+      node.appendChild(d);
+    } else if (INVISIBLE.test(ch)) {
+      flush();
+      var z = el("span", "zwsp", "⌀");
+      z.title = "U+" + ("000" + ch.codePointAt(0).toString(16).toUpperCase()).slice(-4) +
+                " — zero width, invisible in the real string";
+      node.appendChild(z);
+    } else {
+      buf += ch;
+    }
+  }
+  flush();
+}
+
+function renderRaw(node, raw) {
+  clear(node);
+  var needle = S.focusArg ? findArgValue(S.focusArg) : null;
+  if (!needle) { node.appendChild(txt(raw)); return; }
+  var hay = raw.toLowerCase(), lower = needle.toLowerCase();
+  var at = hay.indexOf(lower), from = 0, hits = 0;
+  while (at !== -1) {
+    node.appendChild(txt(raw.slice(from, at)));
+    node.appendChild(el("mark", "hit", raw.substr(at, needle.length)));
+    from = at + needle.length;
+    at = hay.indexOf(lower, from);
+    hits++;
+  }
+  node.appendChild(txt(raw.slice(from)));
+  if (!hits) {
+    var note = el("div", null,
+      "↑ the literal string does not occur here. The runtime's match normalises case and " +
+      "whitespace before comparing, so a match can exist that a plain search does not find — " +
+      "and the trace row, not this highlight, is authoritative.");
+    note.style.cssText = "margin-top:8px;color:var(--ink-3);font-size:11px";
+    node.appendChild(note);
+  }
+}
+
+function findArgValue(name) {
+  var found = null;
+  (S.run.arguments || []).forEach(function (a) { if (a.name === name) found = a.value; });
+  return found;
+}
+
+/* =========================================================================
+   Verdict panel
+   ========================================================================= */
+
+function renderVerdict() {
+  var host = clear(byId("verdict-body"));
+  var d = S.run.decision;
+  var claimed = (S.scenario && !S.scenarioStale) ? S.scenario.outcome : null;
+
+  var cls, gloss;
+  if (d.refused) {
+    cls = "vb-blocked";
+    gloss = "The call was not made. Nothing in the environment changed, and the model is told so in " +
+            "terms that discourage a retry.";
+  } else if (claimed === "hole") {
+    cls = "vb-hole";
+    gloss = "The call went through and this is the outcome the attacker wanted. The scenario below is " +
+            "one of the known holes — it is not a bug in this page and it is not a win.";
+  } else if (claimed === "allowed") {
+    cls = "vb-allowed";
+    gloss = "The call went through, and that is the right answer here: a gate that refused this too " +
+            "would buy its perfect attack rate by breaking every real task.";
+  } else {
+    cls = "vb-open";
+    gloss = "The call went through. Whether that was the right outcome depends on what you were trying " +
+            "to do, and this console cannot know that — so it is not painted as a success.";
+  }
+
+  var banner = el("div", "verdict-banner " + cls);
+  add(banner, el("span", "action", d.action));
+  if (claimed === "hole") add(banner, chip(OUTCOME_WORD.hole || "hole", "hole"));
+  add(banner, el("span", "gloss", gloss));
+  host.appendChild(banner);
+
+  /* Two different questions, and the L5-off arm is exactly where a single
+     "gated: yes" would mislead: the gate receives the call and returns ALLOW
+     without applying a rule. */
+  if (!d.gate_enabled) {
+    add(host, el("p", "callout warn",
+      "L5 is switched OFF in this arm, so the gate applied no rule to this call. " +
+      (d.refused
+        ? "The refusal above did not come from the capability gate."
+        : "It returned ALLOW unconditionally — “" + d.action + "” here means nothing was " +
+          "checked, not that something was checked and permitted.") +
+      " L1 is not toggleable and still ran, which is why the trace below can show these " +
+      "arguments as untrusted in a turn where nothing acts on it."));
+  } else if (!d.routed_to_gate) {
+    add(host, el("p", "callout warn",
+      "L5 is on, but this call never reached it: " +
+      (d.note || "the tool is not in the runtime's registry") +
+      ". A tool the runtime does not know about is not gated at all — the gate cannot refuse " +
+      "a call it is never shown."));
+  }
+
+  add(host, kv([
+    ["tool", d.tool],
+    ["verdict", chip(d.verdict, d.refused ? "blocked" : "allowed")],
+    ["tier", tierCell(d)],
+    ["distinct codes", chip(String(d.distinct_codes))],
+    ["codes", chipList(d.codes, function () { return d.refused ? "blocked" : null; }, "none raised")],
+    ["tainted args", chipList(d.tainted_args, function () { return "danger"; }, "none")],
+    ["routed to gate", chip(
+      d.routed_to_gate
+        ? "yes — the tool is in the registry, so the gate had a say"
+        : "no — not in the registry, so the middleware left it ungated",
+      d.routed_to_gate ? null : "danger")],
+    ["L5 enabled", chip(
+      d.gate_enabled
+        ? "yes — the gate applied its rules"
+        : "no — the gate allows every registered call unconditionally",
+      d.gate_enabled ? "on" : "danger")],
+    d.note ? ["note", d.note] : null
+  ]));
+
+  if (!d.tier_is_meaningful) {
+    add(host, el("p", "callout",
+      "That tier is not a finding. With no argument judged, the greatest lower bound is taken over " +
+      "an empty set, and the bottom of an empty meet is the TOP of the lattice — so the runtime " +
+      "records " + d.tier + " for a call it never examined. It is shown because the runtime " +
+      "reports it, not because it says anything. Read the argument trace instead: it shows what " +
+      "these values actually are."));
+  }
+
+  add(host, el("p", "callout",
+    "distinct_codes counts independent reasons, so a call refused on three violations of two kinds " +
+    "reports " + d.distinct_codes + " here. Removing one reason does not necessarily clear the call."));
+
+  host.appendChild(el("p", "sub-h", "violations"));
+  if (!d.violations.length) {
+    var vmsg;
+    if (!d.gate_enabled) {
+      vmsg = "No violations — because no rule was applied. L5 is off; this is an empty list, " +
+             "not a clean bill of health.";
+    } else if (!d.routed_to_gate) {
+      vmsg = "No violations — because the call was never routed to the gate. " + (d.note || "");
+    } else {
+      vmsg = "The gate judged this call under its rules and raised nothing against it.";
+    }
+    host.appendChild(el("p", "callout", vmsg));
+  } else {
+    var rows = d.violations.map(function (v) {
+      var tr = el("tr");
+      add(tr, td(chip(v.code, "blocked")), td(v.arg, "mono"), td(v.detail, "wrap-any"));
+      return tr;
+    });
+    host.appendChild(table(["code", "arg", "detail"], rows));
+  }
+
+  host.appendChild(el("p", "sub-h", "reason, as the runtime writes it"));
+  var pre = el("pre", "pre reason");
+  pre.textContent = d.reason;
+  host.appendChild(pre);
+
+  if (d.refused && d.refusal_text) {
+    var rh = el("p", "sub-h");
+    add(rh, el("span", null, "refusal text returned to the model"),
+        el("span", "aside", "this string is what the agent sees in place of a tool result"));
+    host.appendChild(rh);
+    var rpre = el("pre", "pre reason");
+    rpre.textContent = d.refusal_text;
+    host.appendChild(rpre);
+  }
+}
+
+/* The runtime records an ungated call at the TOP of the lattice, because the
+   greatest lower bound over no judged arguments is SYSTEM. Beside a trace row
+   showing that same value at T0_UNTRUSTED it reads as a contradiction, so it is
+   presented as a recording rather than as a judgement. */
+function tierCell(d) {
+  if (d.tier_is_meaningful) return tierChip(d.tier);
+  var box = el("div");
+  var c = chip(d.tier, "quiet");
+  c.title = "recorded by the runtime, but not a judgement — nothing was examined";
+  box.appendChild(c);
+  var n = el("div");
+  n.style.cssText = "margin-top:4px;font-size:11px;color:var(--ink-3);font-family:var(--sans)";
+  n.textContent = "means nothing here — no argument was judged";
+  box.appendChild(n);
+  return box;
+}
+
+/* =========================================================================
+   Argument trace — the centrepiece
+   ========================================================================= */
+
+function renderTrace() {
+  var host = clear(byId("trace-body"));
+  var args = S.run.arguments || [];
+  var policy = S.run.policy || {};
+
+  if (!args.length) {
+    add(host, el("p", "callout warn",
+      "The call carries no arguments and the runtime invented none, so there is nothing here to " +
+      "judge. That happens for a read-only tool: the gate has no side effect to guard."));
+    return;
+  }
+
+  var rows = args.map(function (a) {
+    var tr = el("tr", a.tainted ? "tainted" : null);
+    if (S.focusArg === a.name) tr.className += " sel";
+
+    var nameCell = el("td", "argname");
+    nameCell.appendChild(txt(a.name));
+    /* The API says so; the page does not guess from the spelling. A tool that
+       really does take an argument called <conversation> would be mislabelled. */
+    if (a.synthetic) {
+      nameCell.appendChild(el("span", "synthetic-tag", "invented by the runtime"));
+    }
+
+    var whyCell = el("td", "why");
+    whyCell.appendChild(txt(a.why));
+    if (a.matched_tools.length) {
+      var em = el("div");
+      em.style.cssText = "margin-top:5px;font-family:var(--mono);font-size:11px;color:var(--hole)";
+      em.textContent = a.synthetic
+        ? "↳ carries the tier and flags of everything " + a.matched_tools.join(", ") + " returned"
+        : (a.tainted ? "↳ this exact text is inside what " + a.matched_tools.join(", ") + " returned" : "");
+      if (em.textContent) whyCell.appendChild(em);
+    }
+
+    add(tr,
+      nameCell,
+      td(a.value, "val"),
+      td(tierChip(a.tier)),
+      td(bool(a.tainted)),
+      td(chipList(a.matched_tools, function () { return "danger"; }, "no tool output")),
+      td(chipList(a.flags, flagClass, "no flags")),
+      td(highRiskCell(a, policy)),
+      whyCell);
+
+    tr.addEventListener("click", function () {
+      S.focusArg = (S.focusArg === a.name) ? null : a.name;
+      renderTrace();
+      renderGuard();
+    });
+    return tr;
+  });
+
+  host.appendChild(table(
+    ["argument", "value", "tier", "tainted", "matched_tools", "flags", "high_risk", "why"],
+    rows, "trace-table"));
+
+  var real = args.filter(function (a) { return !a.synthetic; });
+  var synthetic = args.filter(function (a) { return a.synthetic; });
+  var untrusted = real.filter(function (a) { return a.tainted; }).length;
+  var explain = el("p", "callout warn");
+  if (untrusted) {
+    explain.textContent = untrusted + " of " + real.length + " supplied argument(s) dropped to an " +
+      "attacker-influenced tier. Not one of them was judged on its wording. Each is untrusted for " +
+      "exactly one reason: its text occurs in output a tool produced this turn, which is the " +
+      "definition of attacker-reachable here. Change a single character of the value and the " +
+      "match — and the tier — goes away.";
+  } else if (synthetic.length) {
+    explain.textContent = "This call supplied no arguments of its own, so there was nothing of the " +
+      "model's to judge. The runtime stands one in for it, carrying the tier and flags of everything " +
+      "the turn read — because a gate you get past by calling a tool with no parameters is not a gate.";
+  } else {
+    explain.textContent = "No argument matched any tool output this turn, so nothing dropped tier. " +
+      "That is a statement about provenance, not about content: an argument can say anything at all " +
+      "and still be trusted if the human is where it came from.";
+  }
+  host.appendChild(explain);
+
+  if (policy.known_to_policy) {
+    var hr = el("p", "callout");
+    hr.textContent = "high_risk is read from the policy file, per tool: " + policy.tool +
+      " declares " + (policy.high_risk_args.length ? policy.high_risk_args.join(", ") : "no") +
+      " high-risk argument name(s). An argument spelled any other way is tracked exactly the same " +
+      "and then not covered by the high-risk rule.";
+    host.appendChild(hr);
+  }
+}
+
+function highRiskCell(a, policy) {
+  var box = el("div");
+  box.appendChild(bool(a.high_risk));
+  if (a.high_risk && policy.known_to_policy) {
+    var n = el("div");
+    n.style.cssText = "margin-top:4px;font-family:var(--mono);font-size:10.5px;color:var(--ink-3)";
+    n.textContent = "named in policy";
+    box.appendChild(n);
+  }
+  return box;
+}
+
+/* =========================================================================
+   Scenarios
+   ========================================================================= */
+
+function renderScenarioButtons() {
+  var host = clear(byId("scen-cols"));
+  var order = [];
+  (S.boot.scenarios || []).forEach(function (s) {
+    if (order.indexOf(s.group) === -1) order.push(s.group);
+  });
+  order.forEach(function (group) {
+    var box = el("div", "scen-group");
+    add(box,
+      el("h3", null, GROUP_TITLE[group] || group),
+      el("p", null, GROUP_BLURB[group] || ""));
+    (S.boot.scenarios || []).forEach(function (s) {
+      if (s.group !== group) return;
+      var b = el("button", "scen-btn o-" + s.outcome);
+      b.type = "button";
+      b.setAttribute("data-key", s.key);
+      var head = el("span", "st", s.title);
+      var meta = el("span", "chips");
+      add(meta, chip(s.key, "quiet"), chip(OUTCOME_WORD[s.outcome] || s.outcome, outcomeClass(s.outcome)));
+      add(b, head, meta);
+      b.addEventListener("click", function () { loadScenario(s.key); });
+      box.appendChild(b);
+    });
+    host.appendChild(box);
+  });
+}
+
+function outcomeClass(outcome) {
+  if (outcome === "blocked") return "blocked";
+  if (outcome === "allowed") return "allowed";
+  if (outcome === "hole") return "hole";
+  return null;
+}
+
+function markActiveScenario() {
+  var btns = document.querySelectorAll(".scen-btn");
+  for (var i = 0; i < btns.length; i++) {
+    var on = S.scenario && !S.scenarioStale && btns[i].getAttribute("data-key") === S.scenario.key;
+    btns[i].className = btns[i].className.replace(/ active/g, "") + (on ? " active" : "");
+  }
+}
+
+function renderScenarioCard() {
+  var host = clear(byId("scen-card"));
+  if (!S.scenario) {
+    add(host, el("p", "blurb",
+      "No scenario loaded — the turn above is whatever you typed. Pick one below to load a case " +
+      "whose claim is verified against the runtime."));
+    return;
+  }
+  var s = S.scenario;
+  var card = el("div", "scen-card" + (S.scenarioStale ? " stale" : ""));
+  var chips = el("div", "chips");
+  chips.style.marginBottom = "7px";
+  add(chips,
+    chip(s.key, "quiet"),
+    chip(s.group, "quiet"),
+    chip("outcome: " + s.outcome + " — " + (OUTCOME_WORD[s.outcome] || s.outcome), outcomeClass(s.outcome)));
+  add(card, chips, el("h3", null, s.title), el("p", null, s.caption));
+  add(card, el("p", "teaches", s.teaches));
+  if (S.scenarioStale) {
+    add(card, el("p", "stale-warn",
+      "You have changed the turn since this scenario was loaded. The outcome label above describes " +
+      "the scenario as shipped, not the run showing above it — read the verdict panel for what " +
+      "actually just happened."));
+  }
+  host.appendChild(card);
+}
+
+/* =========================================================================
+   Honesty panel — quoted numbers
+   ========================================================================= */
+
+function pct(x) {
+  return (typeof x === "number") ? (x * 100).toFixed(1) + "%" : "—";
+}
+
+function stat(label, node, note) {
+  var s = el("div", "stat");
+  add(s, el("span", "sl", label), node);
+  if (note) s.appendChild(el("span", "sn", note));
+  return s;
+}
+function pair(a, b) {
+  var v = el("span", "sv");
+  add(v, txt(a), el("span", "arrowto", "→"), txt(b));
+  return v;
+}
+
+function renderMeasured() {
+  var host = clear(byId("measured-body"));
+  var m = S.boot.measured;
+  if (!m) {
+    add(host, el("p", "callout warn",
+      "The committed benchmark JSON is not on disk in this install, so there are no measured numbers " +
+      "to quote. The console shows nothing here rather than a zero."));
+    return;
+  }
+  var p = m.paired;
+  var row = el("div", "stat-row");
+  add(row,
+    stat("attack success rate", pair(pct(m.baseline_asr), pct(m.defended_asr)), "baseline → defended"),
+    stat("utility", pair(pct(m.baseline_utility), pct(m.defended_utility)), "clean tasks completed"),
+    stat("p-value", el("span", "sv", String(m.p_value)),
+      p ? "floor for " + p.discordant + " discordant pairs: " + p.p_floor : "exact McNemar"),
+    stat("couples", el("span", "sv", String(m.couples)), m.suite + " suite"));
+  host.appendChild(row);
+
+  if (p) renderPaired(host, p);
+
+  add(host, kv([
+    ["suite", m.suite],
+    ["attack", m.attack],
+    ["model", m.model],
+    ["defended layers", chipList(m.defended_layers, function () { return "on"; }, "none")]
+  ]));
+
+  add(host, el("p", "callout", "On the p-value: " + m.p_note));
+
+  if (p && p.p_value === p.p_floor) {
+    add(host, el("p", "callout warn",
+      "p and its floor are the same number here (" + p.p_value + "). With " + p.discordant +
+      " discordant pairs all falling one way, " + p.p_floor + " is the smallest p this test could " +
+      "possibly have returned — so the result sits exactly ON the significance floor, not " +
+      "comfortably below it. One pair going the other way and it would not clear 0.05."));
+  }
+}
+
+/* The 2x2 the p-value is actually computed from. only_baseline is what the
+   defense removed; only_defended is what it introduced. */
+function renderPaired(host, p) {
+  host.appendChild(el("p", "sub-h",
+    "the paired 2×2 — " + p.couples + " couples both arms measured, " + p.discordant + " discordant"));
+
+  var cell = function (n, cls, note) {
+    var c = el("td");
+    add(c, el("div", "paired-n" + (cls ? " " + cls : ""), String(n)), el("div", "paired-note", note));
+    return c;
+  };
+  var r1 = el("tr");
+  add(r1, td(el("span", "paired-rh", "defended: hijacked")),
+    cell(p.both, null, "hijacked in both arms — the attack survived the defense"),
+    cell(p.only_defended, p.only_defended ? "bad" : "good", "hijacks the defense INTRODUCED"));
+  var r2 = el("tr");
+  add(r2, td(el("span", "paired-rh", "defended: clean")),
+    cell(p.only_baseline, "good", "hijacks the defense REMOVED"),
+    cell(p.neither, null, "neither arm was hijacked — nothing to fix"));
+
+  host.appendChild(table(["", "baseline: hijacked", "baseline: clean"], [r1, r2]));
+  add(host, el("p", "callout",
+    "Only the two off-diagonal cells carry any information: McNemar's test is computed on the " +
+    p.discordant + " couples where the arms disagreed. The other " + (p.both + p.neither) +
+    " tell you nothing about whether the defense works."));
+}
+
+function renderAblation() {
+  var host = clear(byId("ablation-body"));
+  var rows = S.boot.ablation || [];
+  if (!rows.length) {
+    add(host, el("p", "callout warn",
+      "The committed ablation JSON is not on disk in this install, so there is nothing to quote here."));
+    return;
+  }
+
+  /* results/README.md calls this caveat not optional reading, so it goes above
+     the table rather than in a footnote. */
+  var screened = rows.filter(function (r) { return r.screening_only; }).length;
+  if (screened) {
+    add(host, el("p", "callout warn",
+      screened + " of these " + rows.length + " arms are marked screening_only, and that caveat is " +
+      "not optional reading. The couples were selected to contain every baseline hijack, so the " +
+      "sample is chosen in the defense's favour: an arm is scored only on the failures it had the " +
+      "chance to fix. No p-value computed on this sample would be valid, and none is quoted for it."));
+  }
+
+  var trs = rows.map(function (r) {
+    var tr = el("tr");
+    add(tr,
+      td(r.arm, "mono"),
+      td(r.layers, "mono"),
+      td(pct(r.asr), "mono"),
+      td(r.hijacks + " / " + r.couples, "mono"),
+      td(pct(r.utility), "mono"),
+      td(runCell(r)),
+      td(r.screening_only
+        ? chip("screening only", "danger")
+        : chip("full sample", "quiet")));
+    return tr;
+  });
+  host.appendChild(table(
+    ["arm", "layers", "attack success", "hijacks", "utility", "how it was run", "sample"], trs));
+
+  var replayed = rows.filter(function (r) { return r.replayed; }).length;
+  if (replayed) {
+    add(host, el("p", "callout",
+      replayed + " of these arms were replayed from a cached result rather than re-run, which is " +
+      "why they report no model calls. It is recorded here because a benchmark figure quietly " +
+      "served from a cache is exactly how a defense collects credit for a run that never happened."));
+  }
+}
+
+function runCell(r) {
+  var box = el("div", "chips");
+  if (r.replayed) box.appendChild(chip("replayed from cache", "quiet"));
+  var calls = (r.model_calls === null || r.model_calls === undefined) ? null : r.model_calls;
+  box.appendChild(chip(calls === null ? "model calls not recorded" : calls + " model calls",
+    calls ? null : "quiet"));
+  return box;
+}
+
+function renderCaveats() {
+  var host = clear(byId("caveats"));
+  var m = S.boot.measured;
+  var abl = S.boot.ablation || [];
+  var utils = abl.map(function (r) { return r.utility; })
+                 .filter(function (u) { return typeof u === "number"; });
+  var couples = abl.length ? abl[0].couples : null;
+
+  var items = [];
+  items.push("The ablation sample above is flagged screening_only: it was selected in the " +
+    "defense’s favour, so no p-value computed on it would be valid and none is quoted for " +
+    "those " + abl.length + " rows.");
+  items.push("One attack type only" + (m && m.attack ? " (" + m.attack + ")" : "") +
+    ". Nothing here says anything about attacks it was not run against.");
+  if (utils.length) {
+    var hi = Math.max.apply(null, utils), lo = Math.min.apply(null, utils);
+    items.push("The ablation’s utility column spans " + pct(hi) + " to " + pct(lo) +
+      " across " + (couples !== null ? couples + " couples" : "the screen") + ". A gap that size " +
+      "on a denominator that small is one broken task — it is the entire difference between the " +
+      "best and worst rows, and it is not a measurement of usability.");
+  }
+  items.push("L4 (quarantined extraction) was OFF in every measured arm, including the one " +
+    "labelled “all layers”. It is also unavailable in this console. Nothing in these numbers is " +
+    "evidence about L4 either way.");
+  if (m) {
+    items.push("The headline row is " + m.couples + " couples on one model (" + m.model + "). " +
+      "It is a signal, not a general claim about prompt-injection defense.");
+  }
+  items.forEach(function (t) { host.appendChild(el("li", null, t)); });
+}
+
+/* =========================================================================
+   Policy panel
+   ========================================================================= */
+
+function renderPolicyStatic() {
+  var host = clear(byId("policy-body"));
+  var p = S.boot.policy;
+
+  var left = el("section", "panel");
+  var lh = el("header");
+  add(lh, el("p", "kicker", "loaded from disk on every request"),
+      el("h2", null, "Policy file"),
+      el("p", "blurb", "One YAML file decides the tier of every source, which tools count as sinks, " +
+        "and which flags block. The console reloads it per request, so editing the file changes the " +
+        "next verdict without a restart."));
+  left.appendChild(lh);
+  var lb = el("div", "body");
+  add(lb, kv([
+    ["path", p.path],
+    ["is default", chip(
+      p.is_default ? "yes — the policy shipped with the library" : "no — an override was loaded",
+      p.is_default ? "quiet" : "danger")],
+    ["version", String(p.version)],
+    ["default tier", tierChip(p.default_tier)],
+    ["tools with a policy", String(p.tool_count)],
+    ["of which side-effecting", String(p.sink_count)],
+    ["blocking flags", chipList(p.blocking_flags, function () { return "danger"; }, "none")]
+  ]));
+  add(lb, el("p", "sub-h", "trust lattice — from the runtime, not this page"));
+  var lat = el("div", "lattice");
+  (S.boot.tiers || []).forEach(function (t) {
+    var row = el("div", "tier-row" + (t.attacker_influenced ? " att" : "") + (t.instruction_authority ? " auth" : ""));
+    var marks = el("div", "chips");
+    add(marks,
+      chip(t.instruction_authority ? "may instruct" : "data only", t.instruction_authority ? "blocked" : "quiet"),
+      chip(t.attacker_influenced ? "attacker-influenced" : "not attacker-influenced", t.attacker_influenced ? "danger" : "quiet"));
+    add(row, el("span", "tv", String(t.value)), el("span", "tl", t.label), marks);
+    lat.appendChild(row);
+  });
+  lb.appendChild(lat);
+
+  add(lb, el("p", "sub-h", "source → tier rules"));
+  var srows = (p.sources || []).map(function (r) {
+    var tr = el("tr");
+    add(tr, td(r.match, "mono"), td(tierChip(r.tier)), td(r.note, "wrap-any"));
+    return tr;
+  });
+  lb.appendChild(table(["match", "tier", "note"], srows));
+  left.appendChild(lb);
+  host.appendChild(left);
+
+  var right = el("section", "panel");
+  var rh = el("header");
+  add(rh, el("p", "kicker", null), el("h2", null, "This tool’s policy"),
+      el("p", "blurb", "The entry the gate read for the tool selected above. Change the tool in the " +
+        "call editor and this changes with it."));
+  rh.querySelector(".kicker").appendChild(el("span", "live"));
+  rh.querySelector(".kicker").appendChild(txt("selected tool — computed live"));
+  right.appendChild(rh);
+  var rb = el("div", "body");
+  rb.id = "tool-policy-body";
+  right.appendChild(rb);
+  host.appendChild(right);
+}
+
+function renderToolPolicy() {
+  var host = byId("tool-policy-body");
+  if (!host) return;
+  clear(host);
+  var p = S.run.policy;
+
+  if (!p.known_to_policy) {
+    add(host, kv([
+      ["tool", p.tool],
+      ["known to policy", bool(false)],
+      ["registered in runtime", bool(p.registered)]
+    ]));
+    add(host, el("p", "callout warn", p.note));
+    return;
+  }
+
+  var allow = el("div");
+  var keys = Object.keys(p.allowlists || {});
+  if (!keys.length) {
+    allow.appendChild(chip("none configured", "quiet"));
+  } else {
+    keys.forEach(function (k) {
+      var line = el("div");
+      line.style.marginBottom = "4px";
+      var box = el("div", "chips");
+      add(box, chip(k + " :", "quiet"));
+      var vals = p.allowlists[k];
+      if (!vals.length) box.appendChild(chip("empty — nothing is allowlisted", "danger"));
+      else vals.forEach(function (v) { box.appendChild(chip(v, "allowed")); });
+      line.appendChild(box);
+      allow.appendChild(line);
+    });
+  }
+
+  add(host, kv([
+    ["tool", p.tool],
+    ["known to policy", bool(true)],
+    ["registered in runtime", bool(p.registered)],
+    ["side effecting", chip(p.side_effecting ? "yes — a sink" : "no — read only", p.side_effecting ? "danger" : "quiet")],
+    ["min arg tier", tierChip(p.min_arg_tier)],
+    ["high risk args", chipList(p.high_risk_args, function () { return "danger"; }, "none named")],
+    ["requires confirmation", bool(p.requires_confirmation)],
+    ["allowlists", allow]
+  ]));
+
+  add(host, el("p", "callout", p.side_effecting
+    ? "Because this tool is a sink, every one of its arguments is read for blocking flags, and its " +
+      "high-risk arguments are additionally refused when they derive from an attacker-influenced tier " +
+      "with no allowlist to authorise the value."
+    : "Because this tool has no side effect, taint on its arguments is recorded and then deliberately " +
+      "not acted on. Refusing reads on taint costs the whole task every time, attack or not."));
+}
+
+/* =========================================================================
+   Footer
+   ========================================================================= */
+
+function renderFoot() {
+  var foot = clear(byId("foot"));
+  var p = S.boot.policy;
+  add(foot, el("p", null,
+    "This page holds no session state. Each run sends the input text and the proposed call together, " +
+    "and the server builds a fresh middleware for that one turn — so one browser tab’s " +
+    "evidence can never refuse another tab’s call, and a stale verdict cannot survive a reload."));
+  var p2 = el("p");
+  p2.style.marginTop = "8px";
+  add(p2, txt("Policy: "), el("code", null, p.path), txt(" (version " + p.version + "). "),
+      txt("Served over loopback only, from a process with no API key, no model client and no egress. " +
+          "Layer 4 is absent, not disabled."));
+  foot.appendChild(p2);
+}
+
+})();
+</script>
+</body>
+</html>
