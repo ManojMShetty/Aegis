@@ -23,7 +23,6 @@ from aegis.llm.base import (
 )
 from aegis.llm.budget import Budget, BudgetExceeded
 from aegis.llm.providers.fake import FakeProvider, RecordedCall
-from aegis.llm.providers.gemini import GeminiProvider
 from aegis.llm.router import LLMRouter, RouterError
 
 __all__ = [
@@ -42,3 +41,16 @@ __all__ = [
     "Role",
     "RouterError",
 ]
+
+
+def __getattr__(name: str) -> object:
+    """Resolve ``GeminiProvider`` on first use.
+
+    See :mod:`aegis.llm.providers` for why: importing it eagerly made httpx a hard
+    requirement of ``import aegis.middleware``, for a layer that is off by default.
+    """
+    if name == "GeminiProvider":
+        from aegis.llm.providers import GeminiProvider as _GeminiProvider
+
+        return _GeminiProvider
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

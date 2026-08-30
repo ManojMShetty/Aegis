@@ -23,7 +23,7 @@ uv sync --group dev --extra evals        # the evals extra is required: tests/ev
 uv run python scripts/demo_attack.py     # watch an injected exfiltration get refused, and a
                                          # legitimate send_email still go through
 uv run python -m evals.retrieval.run     # the retrieval ablation, under a second
-uv run pytest -m "not costly"            # 763 tests, no key, no network
+uv run pytest -m "not costly"            # 803 tests, no key, no network
 
 # re-derive the headline p = 0.031 from the committed results
 uv run python -m evals.stats.analysis --baseline results/week0_baseline_wide.json --defended results/week0_defended_wide.json
@@ -124,15 +124,40 @@ detector, the quarantine extractor, the policy loader, and the retrieval and ing
 modules. You can `pip install` this, import `CapabilityGate`, point it at your own
 `trust_tiers.yaml`, and get decisions.
 
-**Not yet a library: the runtime that makes those judgments usable in a tool loop.** The
+**Also a library: the runtime that makes those judgments usable in a tool loop.** The
 bookkeeping that turns a stream of tool results into "this argument descends from
 untrusted text" — the per-conversation taint state, the value-based argument attribution,
-the reset-between-tasks logic, the refusal-message contract — currently lives in
-[`evals/agentdojo/defense.py`](evals/agentdojo/defense.py) and speaks AgentDojo's message
-types. **So Aegis defends the agent in the benchmark; it cannot yet be dropped in front of
-your agent.** Extracting that runtime into `src/aegis/middleware/` behind a
-framework-neutral interface (tool name, arguments, prior tool outputs → decision) is the
-next milestone, and it is mostly a move rather than a rewrite.
+the reset-between-conversations logic, the refusal-message contract — is
+[`src/aegis/middleware/`](src/aegis/middleware/), and it imports no agent framework
+(a test asserts that, and a second one runs the whole runtime in a subprocess where
+`agentdojo` is unimportable). Hold one `AegisMiddleware` and tell it three things:
+
+```python
+mw.begin_turn(conversation_id, progress)  # which conversation this is
+guarded = mw.guard(ToolOutput.of(name, text))  # L1-L4: spans back, in order
+decisions = mw.decide(calls, known_tools=names)  # L5: refuse? and what to say
+```
+
+`ToolCall` is a name and an argument mapping; `ToolOutput` is a tool name, the text
+fragments the model is about to read, and (only where they differ) the text the defense
+should judge. Back come the rewritten spans, the taint record, and per call a `Decision`
+carrying `refused`, `refusal_text`, and the ledger entry that says why. No message
+types, no environment, no runtime object.
+
+[`evals/agentdojo/defense.py`](evals/agentdojo/defense.py) is now what a second adopter
+would have to write for itself and nothing else: how to spot a tool result in a
+`ChatMessage`, how to put the guarded spans back, how to read a `FunctionCall`, and how
+to phrase a refusal AgentDojo's LLM elements will actually show. It went from ~1,590
+lines to ~890, and the defense decisions it produces are unchanged — the published
+`ASR 18.8% → 0.0%` measurement was produced by this code path, so the extraction was
+held to byte-identical transcripts, side effects and ledgers across every ablation arm
+rather than to a passing test suite alone.
+
+**The honest limit of that claim:** one adapter cannot prove neutrality, only refute it.
+The interface was designed against a single framework, so the next milestone is a
+*second* adapter against a real one — that is what turns "imports no framework" into
+"fits another framework", and it is the thing that will find whichever assumption
+AgentDojo quietly paid for.
 
 **Also worth knowing:** the retrieval half and the defense half share the trust domain but
 never meet at runtime. No retrieved chunk currently reaches an LLM or the defense adapter —
@@ -494,7 +519,7 @@ is scaffolding.
 ## Status
 
 **All five security layers (L1-L5) + retrieval core + retrieval eval: complete and
-verified.** 763 offline tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
+verified.** 803 offline tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
 database dependencies - pydantic and PyYAML only - and runs with no API key, no network
 and no database.
 
@@ -515,6 +540,11 @@ and no database.
 - [x] Sparse retrieval — BM25 implemented directly (no ML dependency), with a conservative stemmer
 - [x] Fusion — Reciprocal Rank Fusion, deterministic for reproducible evals
 - [x] AgentDojo defense adapter + statistics module (Wilson, exact McNemar, clustered bootstrap)
+- [x] **Framework-neutral middleware** (`src/aegis/middleware/`) — taint state, per-conversation
+      reset, value-based argument attribution, decision path and refusal contract, extracted
+      from the eval adapter with the defense decisions held byte-identical
+- [ ] A second adapter, against a framework that is not AgentDojo — one adapter cannot prove
+      the interface is neutral, only that it is not obviously not
 - [x] Defense off vs on, paired at 16 couples: recorded, and not significant
 - [x] **Defense off vs on at 32 couples: ASR 18.8% to 0%, exact McNemar p = 0.031** — significant;
       benign utility 7/8 to 6/8 over the same run, not significant

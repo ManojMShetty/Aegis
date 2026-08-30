@@ -33,7 +33,6 @@ import yaml
 from aegis.llm.base import LLMError, LLMProvider, Role
 from aegis.llm.budget import Budget
 from aegis.llm.providers.fake import FakeProvider
-from aegis.llm.providers.gemini import GeminiProvider
 
 __all__ = ["DEFAULT_MODELS_PATH", "LLMRouter", "RouterError"]
 
@@ -130,6 +129,14 @@ class LLMRouter:
             raise RouterError(f"role '{role.value}' is missing a 'model' name")
 
         if kind == "gemini":
+            # Imported here, not at module scope. The gemini transport needs httpx,
+            # and importing it eagerly made httpx a hard requirement of anything
+            # that touched aegis.llm - including aegis.middleware, by way of the L4
+            # quarantine extractor, for a layer that is off by default. A router
+            # that only ever builds a fake provider should not need a network stack
+            # installed to say so.
+            from aegis.llm.providers import GeminiProvider
+
             return GeminiProvider(
                 model=model,
                 api_key=self._api_key,

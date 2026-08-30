@@ -26,7 +26,21 @@ from aegis.security.capabilities import CapabilityGate, ToolPolicy
 
 __all__ = ["PolicyError", "SecurityPolicy", "SourceRule"]
 
-DEFAULT_POLICY_PATH = Path(__file__).resolve().parents[3] / "config" / "trust_tiers.yaml"
+# The policy ships INSIDE the package, and is found relative to this module rather
+# than to a repository layout.
+#
+# It used to live at the repository root and be reached with `parents[3]`, which
+# works from a checkout and silently does not work from an install: from
+# site-packages that walks to `<venv>/Lib/config/trust_tiers.yaml`, a path nothing
+# creates. Every test passed, because every test runs from the checkout. The
+# failure was reserved for the first person to `pip install aegis` and call the
+# middleware - which is precisely the audience the middleware was extracted for.
+#
+# A security policy is also not incidental data: it is the file that decides which
+# tools are sinks and which arguments are high-risk, so shipping the code without
+# it would leave an installed adopter fail-closed on every call with no way to see
+# why. It belongs in the distribution.
+DEFAULT_POLICY_PATH = Path(__file__).resolve().parent / "trust_tiers.yaml"
 
 
 class PolicyError(ValueError):
