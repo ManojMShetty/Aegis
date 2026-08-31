@@ -276,6 +276,18 @@ def test_the_install_covers_what_the_eval_tests_import() -> None:
             f"installs; tests/evals imports it at module scope, so collection would fail"
         )
 
+    # langgraph fails DIFFERENTLY, and worse. tests/adapters/ guards its imports
+    # with `pytest.importorskip`, so losing the framework does not break
+    # collection - it silently skips twelve tests and CI stays green. That is the
+    # exact shape this whole test exists to prevent, one step quieter, so it is
+    # asserted here rather than left to arrive as an agentdojo transitive.
+    for package in ("langgraph",):
+        assert package in install or package in covered, (
+            f"the CI install neither names {package!r} nor pulls it via an extra it "
+            f"installs; tests/adapters would then SKIP rather than fail, and a suite "
+            f"that quietly collects fewer tests still reports success"
+        )
+
 
 # --------------------------------------------------------------------------
 # 5. A badge may only point at a workflow that exists.

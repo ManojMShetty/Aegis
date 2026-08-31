@@ -9,11 +9,15 @@
 #      and a sync would quietly delete the very packages the eval tests import
 #      (verified: a dry run removes mypy, pytest, pytest-asyncio, pytest-cov,
 #      ruff and types-pyyaml).
-#   2. The `evals` extra pulls ranx, scipy, statsmodels and numpy, and nothing
-#      under tests/ imports any of them, so CI would be paying to install weight
-#      it never uses. (An earlier version of this comment said ranx fails to
-#      build on 3.13. It does not - it ships a py3-none-any wheel and the extra
-#      resolves cleanly. The reason is weight, not a build failure.)
+#   2. It would also install the whole lock rather than the four gates plus what
+#      the tests actually import, which is slower here for no benefit.
+#
+#      (This paragraph used to say the `evals` extra pulls ranx, scipy,
+#      statsmodels and numpy. That stopped being true when the manifest was
+#      trimmed: the extra is now agentdojo, google-genai, openai and tenacity,
+#      and the statistics module is standard library by design. A comment that
+#      describes an intended dependency list rather than the real one is the same
+#      overstatement the manifest itself was trimmed to remove.)
 #
 # The same trap is one step further in: a bare `uv run` implies a sync. Hence
 # UV_NO_SYNC below and the explicit `--no-sync` on every invocation. If you add a
@@ -22,7 +26,20 @@
 #
 # WHAT IS INSTALLED, AND WHY THAT IS ENOUGH
 # -----------------------------------------
-# Core (`.[llm]`)      - pydantic, pyyaml, structlog, httpx, anthropic.
+# Core                 - pydantic and pyyaml. That is the entire runtime
+#                        dependency set; everything below is a test need.
+# `.[llm]`             - httpx, for the Gemini provider. (`anthropic` and
+#                        `structlog` are NOT dependencies of this project,
+#                        and have not been since the trim - an earlier
+#                        version of this line claimed both.)
+# `.[langchain]`       - langgraph and langchain-core, for the adapter in
+#                        src/aegis/adapters/. tests/adapters/ guards its
+#                        imports with `pytest.importorskip`, so an absent
+#                        framework SKIPS twelve tests rather than failing -
+#                        and a suite that collects fewer tests while still
+#                        reporting success is the precise failure this file
+#                        exists to prevent. Named rather than relied on as
+#                        an agentdojo transitive.
 # dev tools            - the gates themselves: ruff, mypy, pytest and plugins.
 # agentdojo            - tests/evals/ imports it at module scope, and mypy checks
 #                        the `evals` package, which imports it too. Without it a
@@ -33,10 +50,13 @@
 #                        and by their tests. Pinned explicitly rather than relied
 #                        on as agentdojo transitives.
 #
-# Not installed, on purpose: torch, sentence-transformers (the `retrieval` extra)
-# and ranx/scipy/statsmodels/numpy (the `evals` extra). Nothing under tests/
-# imports them, so the full `-m "not costly"` suite runs complete without them.
-# If a future test needs one, it needs a `pytest.importorskip`, not a GPU runner.
+# Not installed, on purpose: torch, sentence-transformers, ranx, scipy,
+# statsmodels and numpy. None of them is declared by this project at all any more
+# - the retrieval stack is BM25 written on collections.Counter and the statistics
+# are exact McNemar written on math, both standard library by design. Nothing
+# under tests/ imports any of them, so the full `-m "not costly"` suite runs
+# complete without them. If a future test needs one, it needs a
+# `pytest.importorskip`, not a GPU runner.
 #
 # NO KEY, EVER
 # ------------
@@ -92,7 +112,7 @@ jobs:
         # One invocation, not three: uv then resolves the whole set together and
         # cannot leave a later install quietly downgrading an earlier one.
         run: |
-          uv pip install -e ".[llm]" \
+          uv pip install -e ".[llm,langchain]" \
             "pytest>=8.0" "pytest-asyncio>=0.23" "pytest-cov>=5.0" \
             "ruff>=0.6" "mypy>=1.11" "types-PyYAML" \
             "agentdojo>=0.1.35" "google-genai>=1.0" "openai>=1.40" "tenacity>=8.2"
