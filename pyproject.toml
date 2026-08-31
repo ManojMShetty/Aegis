@@ -44,6 +44,19 @@ evals = [
     "openai>=1.40",
     "tenacity>=8.2",
 ]
+# The LangGraph adapter (src/aegis/adapters/langgraph.py). An adapter is the one
+# place in this project allowed to depend on somebody else's agent framework, and
+# it is an extra rather than a runtime dependency for the reason the whole
+# adapters package exists: nothing in the library needs it, and making it a hard
+# requirement would put a framework in the import graph of the middleware that
+# deliberately imports none.
+#
+# Already present transitively via `evals` (agentdojo pulls langgraph in), but
+# declared here because this code imports it directly and should say so.
+langchain = [
+    "langgraph>=1.0",
+    "langchain-core>=1.0",
+]
 # Measuring the token cost of spotlighting (scripts/estimate_defended_cost.py,
 # scripts/compare_datamarks.py). Not needed by any test.
 cost = [

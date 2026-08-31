@@ -32,7 +32,7 @@ uv run python scripts/demo_attack.py     # watch an injected exfiltration get re
 uv run python scripts/demo_middleware.py # the same defense driven from a hand-written tool
                                          # loop - no agent framework imported anywhere
 uv run python -m evals.retrieval.run     # the retrieval ablation, under a second
-uv run pytest -m "not costly"            # 910 tests, no key, no network
+uv run pytest -m "not costly"            # 922 tests, no key, no network
 
 # re-derive the headline p = 0.031 from the committed results
 uv run python -m evals.stats.analysis --baseline results/week0_baseline_wide.json --defended results/week0_defended_wide.json
@@ -128,7 +128,7 @@ three calls are the same everywhere; only where you hook them differs.
 | Where | Where the three calls go |
 |---|---|
 | **An OpenAI / Groq / any chat-completions tool loop** | `begin_turn` at the top of each iteration; `guard` on each tool result before appending it as the tool message; `decide` on `tool_calls` before executing, substituting `refusal_text` for a refused call's result |
-| **LangChain / LangGraph** | `guard` in `on_tool_end` (or a wrapper Runnable); `decide` in `on_agent_action`, or a node between the LLM node and the `ToolNode`; hold **one** middleware per thread on the graph state — a fresh instance per node can never refuse anything, which looks exactly like a working integration |
+| **LangChain / LangGraph** | **Written for you**: [`AegisToolNode`](src/aegis/adapters/langgraph.py) is a drop-in replacement for `ToolNode` holding both seats. `pip install aegis-rag[langchain]`, then `builder.add_node("tools", AegisToolNode(tools))`. Do *not* reach for a `BaseCallbackHandler` — `on_tool_end` returns `None`, so a callback can observe a tool result but never replace it |
 | **An MCP server fronting real tools** | The strongest placement: the server is the only party that sees both sides of every call regardless of which client is driving. `guard` outbound results, `decide` inbound calls, return a refusal as an `isError` result |
 | **A RAG or document-QA service** | `guard` at the retriever boundary, one call per chunk, with `policy.resolve_tier(chunk.source_uri)` separating a curated corpus from a scraped page |
 | **CI, with no agent at all** | Skip the middleware: `SecurityPolicy.load().build_gate().check(tool, args, auth)` is pure logic, so "did this policy change break a benign flow?" is a unit test rather than a quarterly benchmark |
@@ -230,11 +230,45 @@ lines to ~890, and the defense decisions it produces are unchanged — the publi
 held to byte-identical transcripts, side effects and ledgers across every ablation arm
 rather than to a passing test suite alone.
 
-**The honest limit of that claim:** one adapter cannot prove neutrality, only refute it.
-The interface was designed against a single framework, so the next milestone is a
-*second* adapter against a real one — that is what turns "imports no framework" into
-"fits another framework", and it is the thing that will find whichever assumption
-AgentDojo quietly paid for.
+**That claim now has a second adapter behind it.**
+[`src/aegis/adapters/langgraph.py`](src/aegis/adapters/langgraph.py) is a drop-in
+replacement for LangGraph's `ToolNode`, and
+[`tests/adapters/`](tests/adapters/test_langgraph.py) drives a real compiled graph
+through it: the poisoned page comes back fenced and datamarked, the model obeys the
+injection, the gate refuses `send_email` with the same three codes AgentDojo produced,
+and the test asserts no mail actually left the process. The benign send still goes
+through, and turning every layer off lets the same attack land — so the passing tests
+are distinguishing a working gate from a model that happened not to take the bait.
+
+**What the second adapter found, which is the point of writing one:**
+
+- **The middleware's own contract held.** `begin_turn(conversation_id, progress)` asking
+  for a stable id and a rising counter — rather than for messages — is why LangGraph's
+  `thread_id` dropped straight in, where AgentDojo had needed a hashed key. And
+  `ToolOutput` taking a *tuple* of spans is what let a `ToolMessage` carrying mixed
+  text/image content blocks be guarded block-by-block and put back in place.
+- **This repository's house style broke the integration, silently.** LangGraph decides
+  what to inject into a node by comparing its `config` annotation against the real
+  `RunnableConfig` type. Under `from __future__ import annotations` — used by every
+  other module here, correctly — that annotation is a *string*, the comparison fails,
+  and LangGraph declines to inject the config at all. Nothing crashes: `thread_id`
+  simply never arrives, every run collapses onto one conversation id, and one
+  conversation's taint starts refusing the next one's calls. The warning it emits reads
+  *"should be typed as `RunnableConfig | None`, not `RunnableConfig | None`"* — the same
+  words twice, one the type and one its string. A regression test pins it, and it only
+  works because it shares **one** node across two threads; a test with a fresh node per
+  run passes in both worlds.
+- **Callbacks cannot do this job.** `on_tool_end` returns `None`, so a LangChain callback
+  may observe a tool result but never replace it, and nothing in the callback surface can
+  stop a call from running. That is LangChain's design, not a gap here — but it is the
+  first thing an adopter will try.
+- **Both invocation paths must exist.** A graph driven with `ainvoke` calls the node's
+  `ainvoke`; a sync-only node is not slower, it is unusable. The middleware being pure and
+  synchronous is what made supporting both cheap — only the delegated execution differs.
+
+**The limit that remains:** two adapters are not a proof either, and both were written by
+the same person who designed the interface. What would test it properly is somebody else
+integrating it without asking.
 
 **Not part of that neutrality claim:** [`src/aegis/console/`](src/aegis/console/) is a tool
 *over* the library rather than a piece of it. It ships in the package because an adopter
@@ -610,7 +644,7 @@ is scaffolding.
 ## Status
 
 **All five security layers (L1-L5) + retrieval core + retrieval eval: complete and
-verified.** 910 offline tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
+verified.** 922 offline tests, `mypy --strict` clean, `ruff` clean, and the security core carries no ML, network or
 database dependencies - pydantic and PyYAML only - and runs with no API key, no network
 and no database.
 
@@ -637,8 +671,12 @@ and no database.
 - [x] **Framework-neutral middleware** (`src/aegis/middleware/`) — taint state, per-conversation
       reset, value-based argument attribution, decision path and refusal contract, extracted
       from the eval adapter with the defense decisions held byte-identical
-- [ ] A second adapter, against a framework that is not AgentDojo — one adapter cannot prove
-      the interface is neutral, only that it is not obviously not
+- [x] **A second adapter** (`src/aegis/adapters/langgraph.py`) — a drop-in LangGraph
+      `ToolNode` carrying L1-L5, tested against a real compiled graph. It found that this
+      repo's own `from __future__ import annotations` silently stops LangGraph injecting
+      the config, so `thread_id` never arrives and conversations share taint
+- [ ] A third adapter written by somebody who did not design the interface — two adapters
+      by one author still cannot prove neutrality
 - [x] Defense off vs on, paired at 16 couples: recorded, and not significant
 - [x] **Defense off vs on at 32 couples: ASR 18.8% to 0%, exact McNemar p = 0.031** — significant;
       benign utility 7/8 to 6/8 over the same run, not significant
