@@ -38,8 +38,10 @@ than one that describes nothing, because a reader budgets trust against it.
   implementations in this repository to invoke, with or without a credential; the agent
   under test drives AgentDojo's mock suites, whose side-effecting tools mutate an
   in-memory environment. The import guard below protects only modules that call it, so a
-  second rule requires every module in `aegis.tools` to call it at import scope - adding
-  an unguarded tool means deleting a test that says you may not.
+  second rule requires every module in `aegis.tools` to name it: the check is a text
+  search for `require_real_tools_enabled(` over each file, so it catches a module that
+  forgot the guard entirely, but not one that calls it below module scope. Adding a tool
+  that never mentions the guard means deleting a test that says you may not.
   *Proved by* `test_every_module_in_aegis_tools_calls_the_guard` and its paired negative
   `test_the_guard_coverage_check_would_catch_an_unguarded_module`.
 - **The offline test suite cannot reach a provider.** `tests/conftest.py` strips
@@ -52,14 +54,18 @@ than one that describes nothing, because a reader budgets trust against it.
   guard: under `AEGIS_TOOLS=mock` (the default), it refuses to start if the environment
   holds a variable shaped like a **real tool** credential — detected by name shape
   (`...TOKEN`, `...SECRET`, `...API_KEY`, ...) or by a well-known issuer prefix in the
-  value (`ghp_`, `AKIA`, `xoxb-`, `glpat-`, `ya29.`, ...). The eval runner calls it in
-  `main()` before it builds anything, and exits 2.
+  value (`ghp_`, `AKIA`, `xoxb-`, `glpat-`, `ya29.`, ...). The eval runner never reaches
+  that refusal, because `main()` calls `scrub_environment()` first: any such variable is
+  DELETED from the process and its name — never its value — printed, and the run proceeds
+  without it. That is the stronger guarantee, and it is the one the code implements. What
+  still exits 2 is `AEGIS_TOOLS=real` without the escape hatch, which scrubbing cannot fix.
   *Proved by* `test_tripwire_fires_on_tool_credential_by_name_shape`,
   `test_tripwire_fires_on_tool_credential_by_value_prefix`,
   `test_tripwire_fires_even_inside_a_model_provider_variable`,
   `test_tripwire_is_the_default_with_no_tool_mode_set` and — that the runner really does
-  call it, rather than merely owning a guard —
-  `test_eval_runner_refuses_to_start_beside_a_tool_credential`.
+  act on it, rather than merely owning a guard —
+  `test_eval_runner_removes_a_tool_credential_before_it_starts` and
+  `test_real_tool_mode_is_still_refused_because_scrubbing_cannot_fix_it`.
 - **The tripwire never echoes a value.** Findings carry the variable NAME and a reason;
   the value is never a field, never logged, and cannot appear in the refusal message. A
   guard that printed what it found would be a wider leak than the one it prevents.
@@ -106,9 +112,10 @@ this document cited and did not have.
   `test_compose_file_validates_against_the_docker_cli`.
 
   **The honest caveat, which is why this is not listed as enforced:** an internal network
-  cannot reach the hosted model endpoint either. Every recorded run in `results/` drove
-  `gpt-oss-120b` via Groq and therefore did **not** run inside this compose file — it
-  could not have. That compose service is for a future local-model or fully-mocked
+  cannot reach the hosted model endpoint either. Every recorded run in `results/` drove a
+  hosted model over the internet — `gpt-oss-120b` via Groq, plus the two NVIDIA-hosted
+  `meta/llama-3.1-8b-instruct` runs kept as explicit non-baselines — and therefore did
+  **not** run inside this compose file — it could not have. That compose service is for a future local-model or fully-mocked
   configuration. **No number published from this repository was produced inside that
   network.**
 
@@ -171,7 +178,9 @@ it is not reachable from the network; it serves exactly one static asset address
 constant, so there is no path parameter that could be generalised into a file read from a
 working directory that contains a gitignored `.env`; and it sends a `default-src 'none'`
 CSP so the page cannot acquire an external origin by accident. It is a developer tool and
-is not part of the eval path, which remains egress-free by network policy.
+is not part of the eval path — which is not egress-free either: as stated above, the agent
+under test is a hosted model, so every recorded run made outbound requests, and the
+`internal: true` compose network was in force for none of them.
 
 ## Reporting a vulnerability
 
@@ -183,8 +192,9 @@ find a flaw in the defenses — especially a bypass of the trust lattice or capa
 
 One credential is required, and only one: a **model provider** key (`GROQ_API_KEY` by
 default), because the agent under test is a hosted model. **No tool credential is ever
-required** — the suites are mock — and the startup tripwire in
-`src/aegis/config/sandbox.py` refuses to run beside one.
+required** — the suites are mock — and the eval runner's startup call into
+`src/aegis/config/sandbox.py` deletes any credential-shaped variable from the process
+before it builds anything, printing the name and never the value.
 
 `.env.example` contains placeholders only; `.env` is gitignored, is stripped from the
 environment for every non-costly test by `tests/conftest.py`, and is not copied into the

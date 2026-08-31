@@ -1165,11 +1165,12 @@ def test_a_malformed_json_body_is_a_400_with_an_explanation(base_url: str) -> No
 
 
 def test_the_console_binds_loopback_and_no_code_path_can_change_it(base_url: str) -> None:
-    """The eval path in this repository has no egress at all, by design.
+    """The console process has no egress at all, by design.
 
-    ``tests/security/test_no_egress.py`` and an ``internal: true`` compose network
-    make that a property rather than a habit, and a demo server that could be
-    exposed on a LAN with a flag would be the single hole in it. So the bind
+    It holds no API key and builds no model client, and ``docker-compose`` puts the
+    eval service on an ``internal: true`` network - which was in force for no
+    recorded run, since the agent under test is hosted. A demo server that could be
+    exposed on a LAN with a flag would still be a hole. So the bind
     address is a constant with no CLI option behind it: checked once on a real
     bound socket, and once over the module source the way this repository asserts
     its other structural invariants - the socket proves today's default, the
@@ -1215,7 +1216,8 @@ def test_the_wheel_declares_the_console_page_as_a_build_artifact() -> None:
     ``policy.py`` and not ``trust_tiers.yaml`` - the loader without the file it
     loads - and an installed adopter failed closed on every call with no policy
     to inspect. ``page.html`` is the same shape of dependency: a non-Python file
-    a module reads by absolute path, invisible to the packaging default.
+    a module reads by absolute path. ``packages`` does carry both today - this
+    asserts the glob that keeps carrying them if an ignore rule ever excludes them.
     """
     manifest = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     artifacts = manifest["tool"]["hatch"]["build"]["targets"]["wheel"]["artifacts"]

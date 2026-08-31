@@ -2046,8 +2046,9 @@ function renderVerdict() {
   }
 
   add(host, el("p", "callout",
-    "distinct_codes counts independent reasons, so a call refused on three violations of two kinds " +
-    "reports " + d.distinct_codes + " here. Removing one reason does not necessarily clear the call."));
+    "distinct_codes counts independent REASONS, not violations: a call refused on three " +
+    "violations of two kinds reports 2. This call reports " + d.distinct_codes + ". Above 1, " +
+    "removing one reason does not clear the call."));
 
   host.appendChild(el("p", "sub-h", "violations"));
   if (!d.violations.length) {
@@ -2438,7 +2439,8 @@ function renderCaveats() {
   if (utils.length) {
     var hi = Math.max.apply(null, utils), lo = Math.min.apply(null, utils);
     items.push("The ablation’s utility column spans " + pct(hi) + " to " + pct(lo) +
-      " across " + (couples !== null ? couples + " couples" : "the screen") + ". A gap that size " +
+      " over the clean phase's user tasks — a smaller denominator than the " +
+      (couples !== null ? couples + " couples" : "couples") + " the ASR column uses. A gap that size " +
       "on a denominator that small is one broken task — it is the entire difference between the " +
       "best and worst rows, and it is not a measurement of usability.");
   }

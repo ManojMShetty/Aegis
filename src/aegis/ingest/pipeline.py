@@ -18,9 +18,10 @@ answers "what tier does this source start at?" by matching the source URI
 against ``config/trust_tiers.yaml``. This module never decides a tier itself and
 never accepts one from a caller: the policy file is the audit surface, and a
 pipeline that could override it would make the file decorative. An unmatched
-source falls to ``default_tier``, which the loader requires to be UNTRUSTED - so
-forgetting to add a rule fails closed, at the cost of a document being less
-trusted than it deserved rather than more.
+source falls to ``default_tier``, which is UNTRUSTED in the shipped policy and when
+the key is absent - so forgetting to add a rule fails closed, at the cost of a
+document being less trusted than it deserved rather than more. A policy file that
+raises ``default_tier`` gives that up, and the loader does not stop it.
 
 IDEMPOTENCE, AND ITS HONEST LIMIT
 ---------------------------------

@@ -255,10 +255,12 @@ def test_adding_the_node_to_a_graph_emits_no_warning() -> None:
 
 @pytest.mark.asyncio
 async def test_the_async_path_defends_too() -> None:
-    """A graph driven with ``ainvoke`` calls the node's ``ainvoke``.
+    """A graph driven with ``ainvoke`` still defends.
 
-    Without one the adapter does not degrade to being slow - it is unusable to
-    every async LangGraph deployment, which is most serving code.
+    Note what this does NOT prove: because ``__call__`` is ``invoke``, LangGraph
+    coerces the node as synchronous and runs it in an executor, so this exercises
+    :meth:`AegisToolNode.invoke`, not :meth:`AegisToolNode.ainvoke`. It asserts the
+    async DRIVER is defended, not that the async method is what defends it.
     """
     node = AegisToolNode(TOOLS)
     graph = build(node, [ai([FETCH_CALL]), ai([ATTACK_CALL])])

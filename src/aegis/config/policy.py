@@ -4,7 +4,9 @@ Security posture should be auditable as *data*. A reviewer reads one YAML file
 to know what the system trusts and what each tool requires, rather than tracing
 Python. This module is the bridge, and it is deliberately strict:
 
-* An unmatched source resolves to :attr:`TrustTier.UNTRUSTED` (fail closed).
+* An unmatched source resolves to ``default_tier``, which is
+  :attr:`TrustTier.UNTRUSTED` unless a policy file overrides it (fail closed by
+  default, not by enforcement).
 * An unlisted tool is denied by the gate (fail closed).
 * A malformed policy raises :class:`PolicyError` at load time rather than
   degrading silently — a typo in a security policy must break the build, not
@@ -108,10 +110,11 @@ class SecurityPolicy:
         """The tier content from ``source_uri`` starts at.
 
         First matching rule wins, so ordering in the YAML is meaningful. An
-        unmatched source gets :attr:`default_tier`, which the loader requires to
-        be UNTRUSTED — a source we could not classify is one we do not
-        understand, and guessing upward is exactly the mistake this system
-        exists to prevent.
+        unmatched source gets :attr:`default_tier`, which is UNTRUSTED when the key
+        is absent and is UNTRUSTED in the shipped policy — a source we could not
+        classify is one we do not understand, and guessing upward is exactly the
+        mistake this system exists to prevent. The loader does not enforce that: a
+        policy file may set it higher, and then every unmatched source starts there.
         """
         for rule in self.source_rules:
             if rule.matches(source_uri):

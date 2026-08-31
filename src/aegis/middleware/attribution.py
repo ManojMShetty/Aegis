@@ -62,19 +62,20 @@ the conversation, this pseudo-argument carries that context's tier AND its
 detector flags, so both the tier floor and the blocking-flag rule still have
 something to judge.
 
-Under the shipped policy the FLAGS are the half that does the work: no sink there
-asks for a floor above T0 any more, because a reachable floor over the GLB of all
+Under the shipped policy the FLAGS are the half that does most of the work: no sink
+there asks for a floor of T1 any more, because a reachable floor over the GLB of all
 arguments is a ban on every side effect that touches anything a tool returned
 (see ``config/trust_tiers.yaml``). The tier half stays for the deployments whose
-sinks do set one, and for the money/deletion tools that demand T3.
+sinks do set one, and for the six money/deletion/account tools that demand T3.
 """
 
 MIN_MATCH_CHARS = 4
 """Shortest argument value that may be attributed to a tool output by matching.
 
-Below this, agreement is coincidence: ``true``, ``1``, ``rw`` and ``id`` appear in
+Below this, agreement is coincidence: ``1``, ``rw``, ``id`` and ``en`` appear in
 almost any text, and taint attributed by coincidence is a refusal attributed to
-nothing.
+nothing. (``true`` is four characters and CLEARS this floor; a rendered boolean is
+caught by :data:`MIN_SCALAR_MATCH_CHARS` below instead.)
 """
 
 MIN_SCALAR_MATCH_CHARS = 8
@@ -85,7 +86,7 @@ boolean is not copied text at all - it is a RENDERING, and its agreement with
 prose is correspondingly cheaper. ``str(False)`` is ``'False'``, which occurs in
 any YAML carrying ``recurring: false``; ``str(2024)`` occurs in any document that
 mentions the year; both clear :data:`MIN_MATCH_CHARS` comfortably. Attributing
-taint that way is not merely noise now that the sinks carry no tier floor: the
+taint that way is not merely noise now that most sinks carry no tier floor: the
 coincidentally-matched argument also inherits the matched output's DETECTOR FLAGS,
 so a calendar call with ``all_day=False`` would be refused because some flagged
 document elsewhere in the task contained the word "false".

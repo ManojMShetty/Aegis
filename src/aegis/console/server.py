@@ -5,10 +5,11 @@ has no sockets in it and is therefore tested directly; what is left here is
 routing, JSON encoding and the two safety properties a local server owes:
 
 * **Loopback only.** The bind address is not configurable. This repository's
-  security posture is that the eval path has no egress at all
-  (``tests/security/test_no_egress.py``, ``docker-compose`` on an
-  ``internal: true`` network), and a demo that could be exposed on a LAN with a
-  flag would be the one hole in it. ``127.0.0.1`` is a constant.
+  security posture is that nothing here is reachable from off the host: this process
+  holds no API key, builds no model client and makes no outbound request, and
+  ``docker/docker-compose.yml`` puts the eval service on an ``internal: true`` network
+  (which was in force for no recorded run — the agent under test is hosted). A demo that
+  could be exposed on a LAN with a flag would be the one hole in it. ``127.0.0.1`` is a constant.
 * **No file-reading endpoint.** Exactly one static asset is served, addressed by
   a module-level constant rather than by anything in the URL. The process runs
   with its working directory at a repository root that contains a real,

@@ -2,17 +2,18 @@
 
 WHAT THIS DOES
 --------------
-Ingests the committed golden set once, queries it under all four
+Ingests the committed golden set once, queries it under three
 :class:`~aegis.retrieval.retriever.RetrievalConfig` arms - ``bm25``, ``vector``,
-``hybrid``, ``hybrid+rerank`` - scores each with
+``hybrid`` (``hybrid+rerank`` is deliberately absent; see ``_arm_configs``) - scores
+each with
 :mod:`evals.retrieval.metrics`, and prints one table::
 
     uv run python -m evals.retrieval.run
 
 Offline, no key, no download, well under a second.
 
-ONE CORPUS, FOUR ARMS
----------------------
+ONE CORPUS, THREE ARMS
+----------------------
 The corpus is built once and every arm is a
 :meth:`HybridRetriever.with_config <aegis.retrieval.retriever.HybridRetriever.with_config>`
 view over the *same* indexes. That is not an optimisation: two arms compared
@@ -212,7 +213,7 @@ def evaluate(
     candidate_k: int | None = None,
     confidence: float = DEFAULT_CONFIDENCE,
 ) -> AblationReport:
-    """Build the corpus once and score all four arms against it."""
+    """Build the corpus once and score all three arms against it."""
     if k <= 0:
         raise GoldenSetError(f"k must be positive, got {k}")
     retriever, ingest = build_corpus(golden)
@@ -414,10 +415,10 @@ def report_as_json(report: AblationReport) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 
 _EPILOG = """\
-scores the four retrieval arms over the committed golden set and prints one
+scores the three retrieval arms over the committed golden set and prints one
 comparison table. Everything is offline: no model download, no API key, no
 network. The corpus is ingested once through the real IngestPipeline and the
-real config/trust_tiers.yaml, and all four arms read those same indexes.
+real config/trust_tiers.yaml, and all three arms read those same indexes.
 
   uv run python -m evals.retrieval.run
   uv run python -m evals.retrieval.run --k 10 --per-query
@@ -432,7 +433,7 @@ caveat block under the table says so on every run.
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m evals.retrieval.run",
-        description="Score bm25 / vector / hybrid / hybrid+rerank over a golden set.",
+        description="Score bm25 / vector / hybrid over a golden set.",
         epilog=_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

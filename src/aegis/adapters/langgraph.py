@@ -61,11 +61,13 @@ when a library that resolves types statically meets a framework that resolves
 them at runtime, and it is invisible to every test that uses one instance per
 run. See the comment above the imports.
 
-*Both invocation paths must exist.* A graph driven with ``ainvoke`` calls the
-node's ``ainvoke``. A synchronous-only node does not merely run slower - the
-async path fails outright, so the whole adapter is unusable to half of
-LangGraph's users. The middleware being pure and synchronous is what makes
-supporting both cheap: only the delegated execution differs, so
+*Both invocation paths exist, though the graph reaches only one.* Because
+``__call__`` is :meth:`invoke`, ``add_node`` coerces this node as a SYNCHRONOUS
+callable and builds its async side itself with ``run_in_executor`` - so a graph
+driven with ``ainvoke`` calls :meth:`invoke`, and :meth:`ainvoke` below is reached
+only by a caller holding the node directly. The asymmetry runs the other way: an
+async-ONLY node raises under ``graph.invoke``. Keeping both is nearly free because
+the middleware is pure and synchronous: only the delegated execution differs, so
 :meth:`AegisToolNode._plan` and :meth:`AegisToolNode._assemble` are shared and
 neither knows which path called it.
 
@@ -198,7 +200,11 @@ class AegisToolNode:
     async def ainvoke(
         self, state: dict[str, Any], config: RunnableConfig | None = None
     ) -> dict[str, Any]:
-        """The async twin. Not optional - see the module docstring."""
+        """The async twin, for a caller that holds this node directly.
+
+        A graph does NOT reach it: ``add_node`` coerces this node by ``__call__``,
+        which is :meth:`invoke`, and supplies the async side itself.
+        """
         plan = self._plan(state, config)
         if plan is None:
             return {self._messages_key: []}

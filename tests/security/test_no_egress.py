@@ -472,7 +472,9 @@ def test_every_module_in_aegis_tools_calls_the_guard() -> None:
 
     That gap is what makes SECURITY.md's "no real tools exist" bullet the only
     enforced claim with nothing under it. This closes it structurally: every
-    module in the package must invoke the guard at import scope, so the way to
+    module in the package must NAME the guard - the check is a text search for
+    ``require_real_tools_enabled(`` over each file, so it catches a module that
+    forgot the guard, not one that calls it below module scope - so the way to
     add an unguarded tool is to delete a test that says you may not.
 
     Kept as source inspection rather than an import: importing each module to
@@ -490,8 +492,8 @@ def test_every_module_in_aegis_tools_calls_the_guard() -> None:
     ]
 
     assert not unguarded, (
-        "every module in aegis.tools must call require_real_tools_enabled() at import "
-        f"scope; these do not: {unguarded}. A real tool that skips the guard is a real "
+        "every module in aegis.tools must call require_real_tools_enabled(); this check "
+        f"is a text search, so it cannot see WHERE. These do not: {unguarded}. A real "
         "tool the escape hatch does not gate."
     )
 

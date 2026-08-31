@@ -214,8 +214,10 @@ def test_pytest_excludes_the_costly_tests() -> None:
 def test_ci_never_runs_uv_sync() -> None:
     """``uv sync`` prunes to the lock, deleting the packages the eval tests import.
 
-    It would also try to build ranx, which does not build on 3.13. Both failures
-    are avoidable by never invoking it.
+    (An earlier version of this docstring added that a sync would try to build ranx,
+    which does not build on 3.13. Neither half holds now: ranx ships a pure-Python
+    wheel, and it is in no extra and no lock entry, so a sync could never reach it.
+    Pruning is the whole reason, and it is enough.)
     """
     for command in _run_commands():
         assert "uv sync" not in command, f"a CI step runs uv sync: {command!r}"
@@ -234,7 +236,7 @@ def test_every_uv_run_disables_the_implicit_sync() -> None:
 
 
 def test_the_install_pulls_nothing_heavy() -> None:
-    """No GPU wheel, no multi-gigabyte model, no package that fails to build on 3.13.
+    """No GPU wheel, no multi-gigabyte model, no numerical stack this project does not use.
 
     Nothing under ``tests/`` imports any of these; a test that needs one needs an
     ``importorskip``, not a bigger runner.

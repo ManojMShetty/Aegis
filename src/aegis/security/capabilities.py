@@ -218,10 +218,13 @@ class CapabilityGate:
     """Evaluates whether a tool call may fire.
 
     Stateless and pure: the same inputs always produce the same decision, so the
-    gate is fully unit-testable with no model, network, or database. Enforced
-    twice in the pipeline — once at plan time in the agent graph, once at
-    execution time at the tool boundary — because a check that only runs in the
-    planner is a check an exploit can route around.
+    gate is fully unit-testable with no model, network, or database. Enforced at
+    one point, the tool boundary: :meth:`AegisMiddleware._decide_one` is this
+    package's only caller of :meth:`check`, and every integration - the LangGraph
+    node, the AgentDojo seat, the console - reaches it through
+    :meth:`AegisMiddleware.decide` immediately before execution. There is no
+    plan-time check here and no agent graph to hold one, which is deliberate: a
+    check that only runs in a planner is a check an exploit can route around.
     """
 
     def __init__(

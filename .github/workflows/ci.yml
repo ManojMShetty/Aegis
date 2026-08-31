@@ -7,8 +7,9 @@
 #   1. `uv sync` PRUNES: it removes anything not in the lock's resolution. The
 #      working environment for this project was assembled with `uv pip install`,
 #      and a sync would quietly delete the very packages the eval tests import
-#      (verified: a dry run removes mypy, pytest, pytest-asyncio, pytest-cov,
-#      ruff and types-pyyaml).
+#      (verified: `uv sync --dry-run` in this checkout uninstalls agentdojo, httpx,
+#      openai, google-genai, tenacity and langgraph among others; ruff, mypy, pytest
+#      and its plugins are the `dev` group, which a sync KEEPS).
 #   2. It would also install the whole lock rather than the four gates plus what
 #      the tests actually import, which is slower here for no benefit.
 #

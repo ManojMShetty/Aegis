@@ -733,8 +733,9 @@ def ablation_arms() -> list[dict[str, Any]]:
 
     ``screening_only`` travels with every row because ``results/README.md`` calls
     that caveat "not optional reading": these nine couples were selected to
-    contain all six baseline hijacks, so an arm can only be observed FIXING a
-    failure here and no p-value computed on them is valid.
+    contain all six baseline hijacks - they are a 3x3 block, not the hijack set, so
+    six of the nine are baseline failures and an arm can introduce a hijack on the
+    other three (``spotlight`` did, twice) - and no p-value computed on them is valid.
     """
     out: list[dict[str, Any]] = []
     for arm, layers, filename in _ABLATION_ARMS:

@@ -12,8 +12,10 @@ see what their gate would do to their own tool calls before wiring it into an
 agent - which is the cheaper half of an integration to get wrong.
 
 Everything it renders is computed live and offline. No API key, no network, no
-model: L1, L2, L3 and L5 are deterministic Python, which is the whole reason a
-console like this can exist at all.
+model: L1, L2, L3 and L5 are plain Python, which is the whole reason a console like
+this can exist at all. Not deterministic, though - L2 draws a fresh random nonce per
+span, so the same request fences to different bytes each time, which is exactly what
+lets the page tell a real fence from a forged one.
 
 WHAT IT DELIBERATELY DOES NOT DO
 --------------------------------

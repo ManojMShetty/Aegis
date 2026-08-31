@@ -61,20 +61,24 @@ an attacker". It is the same bug class as SQL injection: **data interpreted as c
 
 ## The approach
 
-Contain untrusted content **by construction**, in depth, so no single layer is load-bearing:
+Contain untrusted content **by construction**, in depth - the design intent; the ablation below finds the gate carrying the measured result on its own:
 
 | # | Layer | What it does |
 |---|---|---|
 | **L1** | **Provenance / taint** | Every chunk carries `{source, trust_tier, content_hash}`, propagated to the citation |
 | **L2** | **Spotlighting** | Untrusted spans are delimited/datamarked as inert data at the boundary |
 | **L3** | **Injection detector** | **Heuristic tier only** — the local-classifier and LLM-judge tiers are designed, not built. **Advisory, not the wall** |
-| **L4** | **Quarantined dual-LLM** | Untrusted text is read *only* by an isolated **no-tool** model returning schema-validated typed data |
+| **L4** | **Quarantined dual-LLM** | Untrusted text is read *only* by an isolated **no-tool** model returning schema-validated typed data. **Built and unit-tested, but OFF in every measured arm** |
 | **L5** | **Capability gating** | A tool fires only if the data driving it is trusted enough *and* the user authorized the action |
 
-The key structural idea is **L4**: the privileged agent never sees raw untrusted text,
-only typed values (`datetime`, `Decimal`, an `Enum` member). Free-form natural language
-is structurally unable to cross the boundary — an attacker's imperative sentence cannot
-fit an ISO-8601 field.
+The strongest structural idea in the design is **L4**: the privileged agent would never
+see raw untrusted text, only typed values (`datetime`, `Decimal`, an `Enum` member), so
+free-form natural language could not cross the boundary — an attacker's imperative
+sentence cannot fit an ISO-8601 field. Read that as design, not as a measured result:
+`DefenseConfig.all_layers()` excludes L4 and every arm in `results/` ran without it, and
+where the middleware does wire it in it contributes a FLAG - the extractor's typed value
+is deliberately discarded rather than substituted (`aegis.middleware.runtime`), so the
+typed-value boundary itself lives in `aegis.security.quarantine`.
 
 ### The trust lattice
 
@@ -262,8 +266,10 @@ are distinguishing a working gate from a model that happened not to take the bai
   may observe a tool result but never replace it, and nothing in the callback surface can
   stop a call from running. That is LangChain's design, not a gap here — but it is the
   first thing an adopter will try.
-- **Both invocation paths must exist.** A graph driven with `ainvoke` calls the node's
-  `ainvoke`; a sync-only node is not slower, it is unusable. The middleware being pure and
+- **Both invocation paths exist, though the graph reaches only one.** Because `__call__`
+  is `invoke`, LangGraph coerces the node as synchronous and supplies the async side
+  itself, so `graph.ainvoke` calls `invoke`; the asymmetry runs the other way, and an
+  async-only node breaks `graph.invoke`. The middleware being pure and
   synchronous is what made supporting both cheap — only the delegated execution differs.
 
 **The limit that remains:** two adapters are not a proof either, and both were written by
@@ -323,19 +329,22 @@ would have been unprovable. That is why widening the baseline from 16 couples to
 32 was the work that mattered, not the defense changing.
 
 The gate is visible in the run rather than inferred: **39 decisions, 11 refusals**
-on `send_email`, `delete_file` and `create_calendar_event`, with zero guard, gate
-or quarantine failures.
+on `send_email`, `delete_file` and `create_calendar_event`, with zero guard and gate
+failures - and a quarantine counter that reads zero only because L4 was off, here as
+in every measured arm.
 
-**The caveat that travels with it.** Benign utility fell from 7/8 to 6/8 - one
-task the defended agent did not finish and the undefended one did. It is *not*
+**The caveat that travels with it.** Benign utility fell from 7/8 to 6/8 - a net of
+two tasks the defended agent did not finish and the undefended one did
+(`user_task_3`, `user_task_4`) against one it finished and the baseline did not
+(`user_task_2`), so three of the eight benign tasks changed outcome. It is *not*
 significant (3 discordant pairs, p = 1.0000, interval spanning zero), but the
 point estimate moved the wrong way, and reporting the ASR result without it would
 be the selective reporting this repository exists to avoid. At eight clean tasks
 the honest reading is "too few tasks to tell", not "no cost".
 
 Provenance: `replayed: false`, 54 model requests. `force_rerun: false` because the
-run resumed - 18 of the 32 couples were measured on 24-25 August and replayed from
-cache, 14 on the 26th. All 32 are real measurements of the same configuration.
+run resumed - 17 of the 32 couples were measured on 24-25 August and replayed from
+cache, 15 on the 26th. All 32 are real measurements of the same configuration.
 
 ### The earlier 16-couple pair, kept for the record
 
@@ -385,8 +394,8 @@ the two cannot be confused.
 
 **Gate behaviour in the defended arm.** The L5 capability gate made 37 decisions and
 refused 5, on `send_email`, `delete_file` and `create_calendar_event`. No read-only tool
-was ever refused (`get_current_day`: 6 allowed, 0 refused). There were no guard, gate or
-quarantine failures. Whatever the gate cost, it was not "refuse everything".
+was ever refused (`get_current_day`: 6 allowed, 0 refused). There were no guard or gate
+failures; the quarantine counter reads zero because L4 was off, not because it ran clean. Whatever the gate cost, it was not "refuse everything".
 
 ### The 32-couple baseline, and what six hijacks unlocks
 
@@ -685,7 +694,7 @@ and no database.
 - [ ] The same ablation on an unselected sample, and leave-one-out under an adaptive
       attacker — the arms above cannot carry a p-value and say so
 - [x] Retrieval eval - recall@k / precision@k / MRR@k / nDCG@k, a committed golden set,
-      and the four-arm ablation in one offline command
+      and the three-arm ablation in one offline command
 - [x] Measured: **hybrid does not beat BM25 on this fixture** - RRF lands between its two
       lexical inputs rather than above them, and the table says so
 - [ ] Dense retrieval (embeddings) + cross-encoder rerank *(needs the ML stack)*
@@ -694,8 +703,8 @@ and no database.
 ## Development
 
 ```bash
-uv sync --group dev --extra evals    # `evals` is NOT optional for the test suite: three
-                                     # files under tests/evals import agentdojo at module
+uv sync --group dev --extra evals    # `evals` is NOT optional for the test suite: four
+                                     # files under tests/evals reach agentdojo at module
                                      # scope, so a core-only install fails COLLECTION, and
                                      # `pytest -m security` fails with it (-m filters after
                                      # collection, so it cannot rescue an import error)

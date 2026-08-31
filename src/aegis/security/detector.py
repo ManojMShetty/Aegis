@@ -12,11 +12,13 @@ pull in opposite directions:
 * False negatives - an adaptive attacker rewrites around any fixed pattern. So
   the detector cannot be trusted to catch everything.
 
-Therefore L3 produces *signals*, and other layers decide what to do with them:
-the capability gate (L5) lets a small set of high-confidence flags veto
-side-effecting calls, and strict-mode ingestion may downgrade the trust of
-flagged curated content. The detector's job is to raise the cost of an attack
-and to sharpen the signal the structural layers act on - not to be load-bearing.
+Therefore L3 produces *signals*, and the layer that acts on them is the capability
+gate (L5), which lets a small set of high-confidence flags veto side-effecting calls.
+:meth:`HeuristicDetector.apply` with ``strict=True`` also offers an ingest-time
+downgrade of flagged content, but nothing here calls it: the ingest pipeline never
+runs the detector, and the middleware only ever calls :meth:`scan`. The
+detector's job is to raise the cost of an attack and to sharpen the signal the
+structural layers act on - not to be load-bearing.
 
 This module is the heuristic tier of the intended cascade
 (heuristics -> local classifier -> LLM judge). The heuristics are free,

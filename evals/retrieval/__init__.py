@@ -28,7 +28,7 @@ WHAT IS HERE
 * :mod:`evals.retrieval.golden_set` - the format, the loader, and the committed
   fixture ``golden_set.json``. Its docstring is blunt about the fixture being
   ours rather than an external benchmark.
-* :mod:`evals.retrieval.run` - the CLI: one corpus, four arms, one table.
+* :mod:`evals.retrieval.run` - the CLI: one corpus, three arms, one table.
 
 WHY THIS FILE RE-EXPORTS NOTHING
 --------------------------------

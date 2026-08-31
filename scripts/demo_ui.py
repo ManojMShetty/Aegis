@@ -15,8 +15,9 @@ taint match misses, rename an argument until the policy stops applying to it. Th
 console ships those three as buttons, because a defense demo that only shows the
 defense winning teaches the wrong lesson.
 
-Offline. No API key, no network, no model - L1, L2, L3 and L5 are deterministic
-Python. The server is loopback-only and standard library only; see
+Offline. No API key, no network, no model - L1, L2, L3 and L5 are plain Python
+(L2's fence nonce is random per span, so "offline" is not "identical twice").
+The server is loopback-only and standard library only; see
 ``src/aegis/console/server.py`` for why both of those are constants rather than
 flags.
 """
